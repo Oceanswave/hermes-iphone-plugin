@@ -108,6 +108,12 @@ class PyMobileDeviceBackend:
             message = str(exc) or repr(exc) or exc.__class__.__name__
             if exc.__class__.__name__ == "ConnectionFailedToUsbmuxdError":
                 message = "Could not connect to usbmuxd. Start/repair usbmuxd and make sure the iPhone is attached and trusted."
+            elif isinstance(exc, PermissionError):
+                message = (
+                    "Permission denied connecting to usbmuxd. The iPhone is visible, but the usbmuxd socket is not writable "
+                    "by this Hermes user. Fix the system usbmuxd/socket permissions, for example with a sudo systemd override "
+                    "or socket mode/group change, then retry iphone_list_devices."
+                )
             return BackendResult(ok=False, error="list_devices_failed", message=message, meta={"backend": self.name, "exception": exc.__class__.__name__})
 
     def _not_wired(self, capability: str) -> BackendResult:

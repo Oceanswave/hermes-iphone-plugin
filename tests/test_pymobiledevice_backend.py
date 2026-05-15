@@ -24,3 +24,22 @@ def test_pymobiledevice_backend_awaits_async_list_devices(monkeypatch):
     assert result.data[0]["udid"] == "UDID123"
     assert result.data[0]["connection_type"] == "USB"
     assert "FakeDevice" in result.data[0]["raw"]
+
+
+def test_pymobiledevice_backend_explains_usbmuxd_permission_denied(monkeypatch):
+    def list_devices():
+        raise PermissionError(13, "Permission denied")
+
+    fake_pkg = types.ModuleType("pymobiledevice3")
+    fake_usbmux = types.ModuleType("pymobiledevice3.usbmux")
+    fake_usbmux.list_devices = list_devices
+    monkeypatch.setitem(sys.modules, "pymobiledevice3", fake_pkg)
+    monkeypatch.setitem(sys.modules, "pymobiledevice3.usbmux", fake_usbmux)
+
+    result = PyMobileDeviceBackend().list_devices()
+
+    assert result.ok is False
+    assert result.error == "list_devices_failed"
+    assert "permission" in result.message.lower()
+    assert "usbmuxd" in result.message.lower()
+    assert result.meta["exception"] == "PermissionError"
