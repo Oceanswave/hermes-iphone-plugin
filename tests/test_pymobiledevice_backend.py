@@ -43,3 +43,43 @@ def test_pymobiledevice_backend_explains_usbmuxd_permission_denied(monkeypatch):
     assert "permission" in result.message.lower()
     assert "usbmuxd" in result.message.lower()
     assert result.meta["exception"] == "PermissionError"
+
+
+def test_diagnostics_reports_wda_helper_and_readiness(monkeypatch, tmp_path):
+    helper = tmp_path / "ensure-iphone-wda.sh"
+    helper.write_text("#!/bin/sh\nexit 0\n")
+    helper.chmod(0o755)
+    monkeypatch.setenv("HERMES_IPHONE_WDA_HELPER", str(helper))
+    monkeypatch.setenv("HERMES_IPHONE_UDID", "UDID123")
+    monkeypatch.setattr(PyMobileDeviceBackend, "_tunneld_ready", lambda self, udid=None: (True, ["UDID123"], None))
+    monkeypatch.setattr(PyMobileDeviceBackend, "_wda_ready", lambda self, udid=None: (True, {"ready": True}, None))
+
+    result = PyMobileDeviceBackend().diagnostics()
+
+    assert result.ok is True
+    assert result.data["udid"] == "UDID123"
+    assert result.data["wda_helper"]["exists"] is True
+    assert result.data["tunneld"]["ready"] is True
+    assert result.data["wda"]["ready"] is True
+
+
+def test_ensure_wda_uses_helper_when_wda_is_down(monkeypatch, tmp_path):
+    helper = tmp_path / "ensure-iphone-wda.sh"
+    helper.write_text("#!/usr/bin/env sh\necho wda-ready\n")
+    helper.chmod(0o755)
+    monkeypatch.setenv("HERMES_IPHONE_WDA_HELPER", str(helper))
+    calls = {"count": 0}
+
+    def fake_ready(self, udid=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return False, None, "down"
+        return True, {"ready": True}, None
+
+    monkeypatch.setattr(PyMobileDeviceBackend, "_wda_ready", fake_ready)
+
+    result = PyMobileDeviceBackend().ensure_wda("UDID123")
+
+    assert result.ok is True
+    assert result.data["already_ready"] is False
+    assert result.data["helper_stdout"] == "wda-ready"

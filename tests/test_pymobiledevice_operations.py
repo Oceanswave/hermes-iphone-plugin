@@ -19,29 +19,42 @@ def install_lockdown(monkeypatch, provider="provider", async_factory=False):
             assert autopair is True
             return provider
 
+    async def service_provider_async(self, udid=None):
+        assert udid == "UDID123"
+        return provider
+
     setattr(fake_lockdown, "create_using_usbmux", create_using_usbmux)
     monkeypatch.setitem(sys.modules, "pymobiledevice3.lockdown", fake_lockdown)
+    monkeypatch.setattr(PyMobileDeviceBackend, "_service_provider_async", service_provider_async)
+
+
+def install_fake_wda_screenshot(monkeypatch, image=b"PNGDATA"):
+    class FakeWdaClient:
+        def __init__(self, service_provider, timeout=10.0):
+            assert service_provider == "provider"
+
+        async def start_session(self):
+            return "SESSION1"
+
+        async def get_screenshot(self, session_id=None):
+            assert session_id == "SESSION1"
+            return image
+
+    fake_wda = types.ModuleType("pymobiledevice3.services.wda")
+    setattr(fake_wda, "WdaServiceClient", FakeWdaClient)
+    monkeypatch.setitem(sys.modules, "pymobiledevice3.services.wda", fake_wda)
 
 
 def test_screenshot_writes_png_artifact_with_metadata(tmp_path, monkeypatch):
     install_lockdown(monkeypatch)
-
-    class FakeScreenshotService:
-        def __init__(self, service_provider):
-            assert service_provider == "provider"
-
-        async def take_screenshot(self):
-            return b"PNGDATA"
-
-    fake_screenshot = types.ModuleType("pymobiledevice3.services.screenshot")
-    setattr(fake_screenshot, "ScreenshotService", FakeScreenshotService)
-    monkeypatch.setitem(sys.modules, "pymobiledevice3.services.screenshot", fake_screenshot)
+    install_fake_wda_screenshot(monkeypatch)
 
     result = PyMobileDeviceBackend(artifact_root=tmp_path).screenshot("UDID123")
 
     assert result.ok is True
     assert result.data["udid"] == "UDID123"
     assert result.data["size_bytes"] == 7
+    assert result.data["transport"] == "wda"
     path = Path(result.data["path"])
     assert path.exists()
     assert path.read_bytes() == b"PNGDATA"
@@ -50,17 +63,7 @@ def test_screenshot_writes_png_artifact_with_metadata(tmp_path, monkeypatch):
 
 def test_screenshot_supports_async_lockdown_factory(tmp_path, monkeypatch):
     install_lockdown(monkeypatch, async_factory=True)
-
-    class FakeScreenshotService:
-        def __init__(self, service_provider):
-            assert service_provider == "provider"
-
-        async def take_screenshot(self):
-            return b"PNGDATA"
-
-    fake_screenshot = types.ModuleType("pymobiledevice3.services.screenshot")
-    setattr(fake_screenshot, "ScreenshotService", FakeScreenshotService)
-    monkeypatch.setitem(sys.modules, "pymobiledevice3.services.screenshot", fake_screenshot)
+    install_fake_wda_screenshot(monkeypatch)
 
     result = PyMobileDeviceBackend(artifact_root=tmp_path).screenshot("UDID123")
 
@@ -152,7 +155,42 @@ def test_tap_uses_wda_coordinate_endpoint(monkeypatch):
 
     assert result.ok is True
     assert result.data == {"x": 12, "y": 34, "udid": "UDID123"}
-    assert ("POST", "/session/SESSION1/wda/tap/0", {"x": 12, "y": 34}) in calls
+    assert ("POST", "/session/SESSION1/wda/tap", {"x": 12, "y": 34}) in calls
+
+
+def test_tap_retries_after_wda_self_heal(monkeypatch):
+    install_lockdown(monkeypatch)
+    calls = []
+    attempts = {"count": 0}
+
+    class FakeWdaClient:
+        def __init__(self, service_provider, timeout=10.0):
+            pass
+
+        async def start_session(self):
+            return "SESSION1"
+
+        async def _request_json(self, method, path, payload=None):
+            attempts["count"] += 1
+            calls.append((method, path, payload))
+            if attempts["count"] == 1:
+                raise RuntimeError("wda down")
+            return {"status": 0}
+
+    fake_wda = types.ModuleType("pymobiledevice3.services.wda")
+    setattr(fake_wda, "WdaServiceClient", FakeWdaClient)
+    monkeypatch.setitem(sys.modules, "pymobiledevice3.services.wda", fake_wda)
+    monkeypatch.setattr(PyMobileDeviceBackend, "_ensure_wda", lambda self, udid=None: True)
+
+    result = PyMobileDeviceBackend().tap(12, 34, "UDID123")
+
+    assert result.ok is True
+    assert result.meta["self_healed_wda"] is True
+    assert attempts["count"] == 2
+    assert calls == [
+        ("POST", "/session/SESSION1/wda/tap", {"x": 12, "y": 34}),
+        ("POST", "/session/SESSION1/wda/tap", {"x": 12, "y": 34}),
+    ]
 
 
 def test_type_text_uses_wda_send_keys(monkeypatch):
@@ -203,3 +241,84 @@ def test_press_button_uses_wda_press_button(monkeypatch):
     assert result.ok is True
     assert result.data == {"button": "home", "udid": "UDID123"}
     assert calls == [("home", "SESSION1")]
+
+
+def test_screen_info_uses_wda_status_size_and_orientation(monkeypatch):
+    install_lockdown(monkeypatch)
+
+    class FakeWdaClient:
+        def __init__(self, service_provider, timeout=10.0):
+            pass
+
+        async def start_session(self):
+            return "SESSION1"
+
+        async def get_status(self):
+            return {"value": {"ready": True}}
+
+        async def get_window_size(self, session_id=None):
+            assert session_id == "SESSION1"
+            return {"width": 1284, "height": 2778}
+
+        async def _request_json(self, method, path, payload=None):
+            assert (method, path, payload) == ("GET", "/session/SESSION1/orientation", None)
+            return {"value": "PORTRAIT"}
+
+    fake_wda = types.ModuleType("pymobiledevice3.services.wda")
+    setattr(fake_wda, "WdaServiceClient", FakeWdaClient)
+    monkeypatch.setitem(sys.modules, "pymobiledevice3.services.wda", fake_wda)
+
+    result = PyMobileDeviceBackend().screen_info("UDID123")
+
+    assert result.ok is True
+    assert result.data["window_size"] == {"width": 1284, "height": 2778}
+    assert result.data["orientation"] == "PORTRAIT"
+
+
+def test_source_uses_wda_source(monkeypatch):
+    install_lockdown(monkeypatch)
+
+    class FakeWdaClient:
+        def __init__(self, service_provider, timeout=10.0):
+            pass
+
+        async def start_session(self):
+            return "SESSION1"
+
+        async def get_source(self, session_id=None):
+            assert session_id == "SESSION1"
+            return "<App><Button name='OK'/></App>"
+
+    fake_wda = types.ModuleType("pymobiledevice3.services.wda")
+    setattr(fake_wda, "WdaServiceClient", FakeWdaClient)
+    monkeypatch.setitem(sys.modules, "pymobiledevice3.services.wda", fake_wda)
+
+    result = PyMobileDeviceBackend().source("UDID123")
+
+    assert result.ok is True
+    assert result.data["length"] == len("<App><Button name='OK'/></App>")
+    assert "Button" in result.data["source"]
+
+
+def test_swipe_uses_wda_swipe(monkeypatch):
+    install_lockdown(monkeypatch)
+    calls = []
+
+    class FakeWdaClient:
+        def __init__(self, service_provider, timeout=10.0):
+            pass
+
+        async def start_session(self):
+            return "SESSION1"
+
+        async def swipe(self, start_x, start_y, end_x, end_y, duration=0.2, session_id=None):
+            calls.append((start_x, start_y, end_x, end_y, duration, session_id))
+
+    fake_wda = types.ModuleType("pymobiledevice3.services.wda")
+    setattr(fake_wda, "WdaServiceClient", FakeWdaClient)
+    monkeypatch.setitem(sys.modules, "pymobiledevice3.services.wda", fake_wda)
+
+    result = PyMobileDeviceBackend().swipe(1, 2, 3, 4, duration=0.7, udid="UDID123")
+
+    assert result.ok is True
+    assert calls == [(1, 2, 3, 4, 0.7, "SESSION1")]

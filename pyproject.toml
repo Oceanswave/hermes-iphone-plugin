@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
@@ -8,14 +8,37 @@ version = "0.1.0"
 description = "Native Hermes plugin for attached iPhone automation"
 readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Sean McLellan", email = "sean@baristalabs.io" },
+]
+keywords = ["hermes-agent", "iphone", "ios", "automation", "webdriveragent", "pymobiledevice3"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
 dependencies = []
 
+[project.urls]
+Homepage = "https://github.com/baristalabs/hermes-iphone-plugin"
+Repository = "https://github.com/baristalabs/hermes-iphone-plugin"
+
 [project.optional-dependencies]
-iphone = ["pymobiledevice3>=4"]
+iphone = ["pymobiledevice3>=9.12"]
 test = ["pytest>=8"]
+dev = ["pytest>=8", "build>=1.2", "twine>=5"]
 
 [project.entry-points."hermes_agent.plugins"]
-iphone = "hermes_iphone"
+hermes-iphone-plugin = "hermes_iphone"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hermes_iphone"]
+
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
