@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hermes-iphone-plugin"
+version = "0.1.0"
+description = "Native Hermes plugin for attached iPhone automation"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+iphone = ["pymobiledevice3>=4"]
+test = ["pytest>=8"]
+
+[project.entry-points."hermes_agent.plugins"]
+iphone = "hermes_iphone"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hermes_iphone"]
