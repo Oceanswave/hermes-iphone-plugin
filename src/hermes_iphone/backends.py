@@ -4,6 +4,7 @@ import asyncio
 import importlib.util
 import inspect
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -116,29 +117,132 @@ class PyMobileDeviceBackend:
                 )
             return BackendResult(ok=False, error="list_devices_failed", message=message, meta={"backend": self.name, "exception": exc.__class__.__name__})
 
-    def _not_wired(self, capability: str) -> BackendResult:
+    def _run_async(self, value: Any) -> Any:
+        if inspect.isawaitable(value):
+            return asyncio.run(value)
+        return value
+
+    def _service_provider(self, udid: str | None = None) -> Any:
+        from pymobiledevice3.lockdown import create_using_usbmux  # type: ignore
+
+        return self._run_async(create_using_usbmux(serial=udid, autopair=True))
+
+    async def _service_provider_async(self, udid: str | None = None) -> Any:
+        from pymobiledevice3.lockdown import create_using_usbmux  # type: ignore
+
+        provider = create_using_usbmux(serial=udid, autopair=True)
+        if inspect.isawaitable(provider):
+            return await provider
+        return provider
+
+    def _error(self, capability: str, exc: Exception) -> BackendResult:
+        message = str(exc) or repr(exc) or exc.__class__.__name__
+        if exc.__class__.__name__ == "WdaError":
+            message = (
+                f"{capability} requires a reachable WebDriverAgent (WDA) service on the iPhone. "
+                f"pymobiledevice3 reported: {message}"
+            )
+        elif exc.__class__.__name__ == "InvalidServiceError":
+            message = (
+                f"{capability} requires an iOS developer/device-control service that this phone is not currently exposing. "
+                "Enable Developer Mode / Web Inspector / Remote Automation as appropriate, ensure the device is trusted, "
+                f"then retry. pymobiledevice3 reported: {message}"
+            )
         return BackendResult(
             ok=False,
-            error="capability_not_implemented",
-            message=(
-                f"{capability} needs the native WebDriverAgent / device-control adapter wired. "
-                "The plugin is installed and the backend is detected, but this MVP has only device discovery and safe tool plumbing."
-            ),
-            meta={"backend": self.name},
+            error=f"{capability}_failed",
+            message=message,
+            meta={"backend": self.name, "exception": exc.__class__.__name__},
         )
 
+    async def _wda_session(self, udid: str | None = None) -> tuple[Any, str]:
+        from pymobiledevice3.services.wda import WdaServiceClient  # type: ignore
+
+        client = WdaServiceClient(await self._service_provider_async(udid), timeout=10.0)
+        session_id = await client.start_session()
+        return client, session_id
+
     def screenshot(self, udid: str | None = None) -> BackendResult:
-        return self._not_wired("screenshot")
+        async def run() -> bytes:
+            from pymobiledevice3.services.screenshot import ScreenshotService  # type: ignore
+
+            service = ScreenshotService(await self._service_provider_async(udid))
+            return await service.take_screenshot()
+
+        try:
+            image = self._run_async(run())
+            self.artifact_root.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            udid_part = udid or "default"
+            path = self.artifact_root / f"iphone-screenshot-{udid_part}-{stamp}.png"
+            path.write_bytes(image)
+            return BackendResult(
+                ok=True,
+                data={"path": str(path), "size_bytes": len(image), "udid": udid},
+                meta={"backend": self.name},
+            )
+        except Exception as exc:
+            return self._error("screenshot", exc)
+
     def open_url(self, url: str, udid: str | None = None) -> BackendResult:
-        return self._not_wired("open_url")
+        async def run() -> None:
+            from pymobiledevice3.cli.webinspector import launch_task  # type: ignore
+
+            await launch_task(await self._service_provider_async(udid), url, 5.0)
+
+        try:
+            self._run_async(run())
+            return BackendResult(ok=True, data={"url": url, "udid": udid}, meta={"backend": self.name})
+        except Exception as exc:
+            return self._error("open_url", exc)
+
     def launch_app(self, bundle_id: str, udid: str | None = None) -> BackendResult:
-        return self._not_wired("launch_app")
+        async def run() -> int:
+            from pymobiledevice3.services.dvt.instruments.dvt_provider import DvtProvider  # type: ignore
+            from pymobiledevice3.services.dvt.instruments.process_control import ProcessControl  # type: ignore
+
+            async with DvtProvider(await self._service_provider_async(udid)) as dvt:
+                async with ProcessControl(dvt) as process_control:
+                    return await process_control.launch(bundle_id)
+
+        try:
+            pid = self._run_async(run())
+            return BackendResult(ok=True, data={"bundle_id": bundle_id, "pid": pid, "udid": udid}, meta={"backend": self.name})
+        except Exception as exc:
+            return self._error("launch_app", exc)
+
     def tap(self, x: int, y: int, udid: str | None = None) -> BackendResult:
-        return self._not_wired("tap")
+        async def run() -> None:
+            client, session_id = await self._wda_session(udid)
+            await client._request_json("POST", f"/session/{session_id}/wda/tap/0", {"x": x, "y": y})
+
+        try:
+            self._run_async(run())
+            return BackendResult(ok=True, data={"x": x, "y": y, "udid": udid}, meta={"backend": self.name})
+        except Exception as exc:
+            return self._error("tap", exc)
+
     def type_text(self, text: str, udid: str | None = None) -> BackendResult:
-        return self._not_wired("type_text")
+        async def run() -> None:
+            client, session_id = await self._wda_session(udid)
+            await client.send_keys(text, session_id=session_id)
+
+        try:
+            self._run_async(run())
+            return BackendResult(ok=True, data={"text_length": len(text), "udid": udid}, meta={"backend": self.name})
+        except Exception as exc:
+            return self._error("type_text", exc)
+
     def press_button(self, button: str, udid: str | None = None) -> BackendResult:
-        return self._not_wired("press_button")
+        async def run() -> None:
+            client, session_id = await self._wda_session(udid)
+            await client.press_button(button, session_id=session_id)
+
+        try:
+            self._run_async(run())
+            return BackendResult(ok=True, data={"button": button, "udid": udid}, meta={"backend": self.name})
+        except Exception as exc:
+            return self._error("press_button", exc)
 
 
 def make_backend() -> IphoneBackend:
