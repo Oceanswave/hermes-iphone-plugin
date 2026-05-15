@@ -54,8 +54,17 @@ Semantic automation notes:
 - Use `iphone_current_app` before app-specific flows.
 - Use `iphone_launch_or_focus` instead of blindly launching apps.
 - Use `iphone_find_element`/`iphone_tap_text` for buttons and labels before falling back to `iphone_tap` coordinates.
+- Use `iphone_describe_screen` for a compact current-screen summary and `iphone_tap_element` when selecting by id from the semantic tree.
 - Use `iphone_type_into_field` for text entry; it logs text length but not text contents under `~/iphone-action-logs`.
+- Use `iphone_last_trace` and `iphone_action_logs` to debug recent semantic actions.
 - Use `iphone_source` only when raw XML is necessary; `iphone_tree` is the compact default.
+
+Safe Messages flow:
+- `iphone_prepare_text` now opens/focuses Messages, taps Compose, types recipient/body, captures a screenshot before send, locates Send, and returns a token.
+- `iphone_prepare_text` must never tap Send.
+- Do not call `iphone_confirm_prepared_action` until the user explicitly approves the exact recipient/body in chat.
+- `iphone_confirm_prepared_action` consumes the one-time token and taps Send for `send_text` actions.
+- Message body text must not be persisted to logs/traces; only body length and metadata are retained.
 
 WDA/self-healing notes:
 - The known WDA runner bundle id on Sean's phone is `com.baristalabs.WebDriverAgentRunner.xctrunner`.

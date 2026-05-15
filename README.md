@@ -75,13 +75,35 @@ The semantic layer is built on `iphone_source` and avoids raw coordinate cruft f
 iphone_tree             -> compact visible/accessibility-oriented element list
 iphone_find_element     -> locate elements by text, type, enabled/visible state
 iphone_tap_text         -> locate and tap an element center
+iphone_tap_element      -> tap an element id from the current semantic tree
+iphone_describe_screen  -> compact human-readable current screen summary
 iphone_wait_for_text    -> poll until UI text appears
 iphone_type_into_field  -> tap a field/label and type text
 iphone_current_app      -> inspect foreground app from WDA source
 iphone_launch_or_focus  -> avoid relaunching an already-foreground app
+iphone_last_trace       -> inspect the latest trace folder
+iphone_action_logs      -> inspect recent redacted action logs
 ```
 
 Every semantic action records a small JSON action log under `~/iphone-action-logs`. Sensitive typed text is redacted to length metadata rather than persisted verbatim.
+
+Trace folders live under `~/iphone-traces` and include metadata plus compact UI tree snapshots. Screenshots are attached when the active backend supports them; trace creation is best-effort and does not block the UI action.
+
+## Safe Messages flow
+
+`iphone_prepare_text` is now a real staged Messages flow:
+
+1. launch/focus Messages (`com.apple.MobileSMS`)
+2. tap Compose
+3. type recipient
+4. type body
+5. capture a screenshot before send
+6. locate Send
+7. return a one-time token
+
+It never taps Send. It also does not persist the message body in action logs or traces; logs keep body length and recipient metadata only.
+
+Only `iphone_confirm_prepared_action(token=...)`, after explicit user approval, consumes the token and taps Send. Tokens are one-time use and expire.
 
 ## Configuration
 

@@ -7,13 +7,24 @@ from pathlib import Path
 from typing import Any
 
 from .backends import IphoneBackend, make_backend
-from .semantic import compact_tree_from_xml, find_elements, first_element, is_input
+from .safety import SafetyPolicy
+from .semantic import compact_tree_from_xml, find_elements, is_input
+from .state import PluginState
 
 
 class IphoneService:
-    def __init__(self, backend: IphoneBackend | None = None, action_log_root: Path | None = None):
+    def __init__(
+        self,
+        backend: IphoneBackend | None = None,
+        action_log_root: Path | None = None,
+        trace_root: Path | None = None,
+        state: PluginState | None = None,
+    ):
         self.backend = backend or make_backend()
         self.action_log_root = action_log_root or Path.home() / "iphone-action-logs"
+        self.trace_root = trace_root or Path.home() / "iphone-traces"
+        self.state = state or PluginState(root=(self.action_log_root.parent / "iphone-state" if action_log_root else None))
+        self.policy = SafetyPolicy(state=self.state)
 
     def _result(self, result) -> dict[str, Any]:
         payload = result.to_dict() if hasattr(result, "to_dict") else dict(result)
@@ -26,11 +37,10 @@ class IphoneService:
             "ok": True,
             "plugin": "hermes-iphone-plugin",
             "backend": getattr(self.backend, "name", "unknown"),
-            "backends": {
-                "pymobiledevice3": self.backend.name == "pymobiledevice3",
-            },
+            "backends": {"pymobiledevice3": self.backend.name == "pymobiledevice3"},
             "safety": {
                 "external_actions_require_confirmation": ["send_text", "place_call", "delete", "purchase", "settings_change"],
+                "safe_text_flow": "iphone_prepare_text composes and screenshots; iphone_confirm_prepared_action is the only tool that taps Send.",
             },
         }
         diagnostics = getattr(self.backend, "diagnostics", None)
@@ -43,24 +53,34 @@ class IphoneService:
 
     def list_devices(self) -> dict[str, Any]:
         return self._result(self.backend.list_devices())
+
     def ensure_wda(self, udid: str | None = None) -> dict[str, Any]:
         return self._result(self.backend.ensure_wda(udid=udid))
+
     def screenshot(self, udid: str | None = None) -> dict[str, Any]:
         return self._result(self.backend.screenshot(udid=udid))
+
     def screen_info(self, udid: str | None = None) -> dict[str, Any]:
         return self._result(self.backend.screen_info(udid=udid))
+
     def source(self, udid: str | None = None) -> dict[str, Any]:
         return self._result(self.backend.source(udid=udid))
+
     def open_url(self, url: str, udid: str | None = None) -> dict[str, Any]:
         return self._result(self.backend.open_url(url=url, udid=udid))
+
     def launch_app(self, bundle_id: str, udid: str | None = None) -> dict[str, Any]:
         return self._result(self.backend.launch_app(bundle_id=bundle_id, udid=udid))
+
     def tap(self, x: int, y: int, udid: str | None = None) -> dict[str, Any]:
         return self._result(self.backend.tap(x=x, y=y, udid=udid))
+
     def swipe(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 0.2, udid: str | None = None) -> dict[str, Any]:
         return self._result(self.backend.swipe(start_x=start_x, start_y=start_y, end_x=end_x, end_y=end_y, duration=duration, udid=udid))
+
     def type_text(self, text: str, udid: str | None = None) -> dict[str, Any]:
         return self._result(self.backend.type_text(text=text, udid=udid))
+
     def press_button(self, button: str, udid: str | None = None) -> dict[str, Any]:
         return self._result(self.backend.press_button(button=button, udid=udid))
 
@@ -79,8 +99,56 @@ class IphoneService:
         path.write_text(json.dumps(record, sort_keys=True, indent=2))
         return str(path)
 
+    def _new_trace(self, action: str, payload: dict[str, Any] | None = None, udid: str | None = None) -> dict[str, Any]:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+        safe_action = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in action).strip("-") or "action"
+        trace_dir = self.trace_root / f"{stamp}-{safe_action}"
+        trace_dir.mkdir(parents=True, exist_ok=True)
+        meta = {"action": action, "timestamp": stamp, "udid": udid, **(payload or {})}
+        tree = self._tree(udid=udid)
+        if tree.get("ok"):
+            (trace_dir / "tree-before.json").write_text(json.dumps(tree.get("data", {}).get("tree", {}), indent=2, sort_keys=True))
+        try:
+            shot = self.screenshot(udid=udid)
+        except Exception as exc:
+            shot = {"ok": False, "error": exc.__class__.__name__, "message": str(exc)}
+        if shot.get("ok"):
+            meta["screenshot"] = (shot.get("data") or {}).get("path")
+        else:
+            meta["screenshot_error"] = shot.get("error") or shot.get("message")
+        (trace_dir / "meta.json").write_text(json.dumps(meta, indent=2, sort_keys=True))
+        return {"trace_dir": str(trace_dir), "screenshot": meta.get("screenshot")}
+
     def tree(self, udid: str | None = None) -> dict[str, Any]:
         return self._tree(udid=udid)
+
+    def describe_screen(self, udid: str | None = None, limit: int = 20) -> dict[str, Any]:
+        tree_result = self._tree(udid=udid)
+        if not tree_result.get("ok"):
+            return tree_result
+        tree = tree_result["data"]["tree"]
+        elements = tree.get("elements", [])[:limit]
+        summary = "\n".join(f"{el.get('id')} {el.get('type')}: {el.get('label')}" for el in elements)
+        return {"ok": True, "data": {"bundle_id": tree.get("bundle_id"), "name": tree.get("name"), "summary": summary, "elements": elements, "udid": udid}, "meta": {"backend": getattr(self.backend, "name", "unknown")}}
+
+    def last_trace(self) -> dict[str, Any]:
+        traces = sorted([p for p in self.trace_root.glob("*") if p.is_dir()], reverse=True)
+        if not traces:
+            return {"ok": False, "error": "trace_not_found", "message": "No iPhone trace folders found."}
+        latest = traces[0]
+        meta_path = latest / "meta.json"
+        meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+        return {"ok": True, "data": {"trace_dir": str(latest), "meta": meta, "files": sorted(p.name for p in latest.iterdir())}}
+
+    def action_logs(self, limit: int = 10) -> dict[str, Any]:
+        logs = sorted(self.action_log_root.glob("iphone-action-*.json"), reverse=True)[:limit]
+        entries = []
+        for path in logs:
+            try:
+                entries.append({"path": str(path), "record": json.loads(path.read_text())})
+            except Exception:
+                entries.append({"path": str(path), "record": None})
+        return {"ok": True, "data": {"logs": entries, "count": len(entries)}}
 
     def find_element(self, text: str | None = None, element_type: str | None = None, enabled: bool | None = None, visible: bool | None = True, udid: str | None = None) -> dict[str, Any]:
         tree_result = self._tree(udid=udid)
@@ -94,11 +162,22 @@ class IphoneService:
 
     def tap_element(self, element: dict[str, Any], udid: str | None = None) -> dict[str, Any]:
         center = element.get("center") or {}
+        trace = self._new_trace("tap_element", {"element": element}, udid=udid)
         result = self.tap(x=int(center["x"]), y=int(center["y"]), udid=udid)
         if result.get("ok"):
             result.setdefault("data", {})["element"] = element
             result.setdefault("meta", {})["action_log"] = self._log_action("tap_element", {"element": element, "udid": udid})
+            result.setdefault("meta", {})["trace_dir"] = trace["trace_dir"]
         return result
+
+    def tap_element_id(self, element_id: str, udid: str | None = None) -> dict[str, Any]:
+        tree_result = self._tree(udid=udid)
+        if not tree_result.get("ok"):
+            return tree_result
+        for element in tree_result["data"]["tree"].get("elements", []):
+            if element.get("id") == element_id:
+                return self.tap_element(element, udid=udid)
+        return {"ok": False, "error": "element_not_found", "message": f"No current element has id {element_id!r}", "data": {"element_id": element_id}}
 
     def tap_text(self, text: str, element_type: str | None = None, udid: str | None = None) -> dict[str, Any]:
         found = self.find_element(text=text, element_type=element_type, enabled=True, udid=udid)
@@ -125,7 +204,6 @@ class IphoneService:
             return found
         element = found["data"]["element"]
         if not is_input(element):
-            # Still allow named fields represented as static labels by tapping their center; WDA focus behavior decides success.
             pass
         tapped = self.tap_element(element, udid=udid)
         if not tapped.get("ok"):
@@ -151,3 +229,45 @@ class IphoneService:
         if launched.get("ok"):
             launched.setdefault("data", {})["already_foreground"] = False
         return launched
+
+    def prepare_text(self, to: str, body: str, udid: str | None = None) -> dict[str, Any]:
+        launched = self.launch_or_focus("com.apple.MobileSMS", udid=udid)
+        if not launched.get("ok"):
+            return launched
+        self.tap_text("Compose", udid=udid)
+        typed_to = self.type_into_field("To:", to, udid=udid)
+        if not typed_to.get("ok"):
+            return typed_to
+        typed_body = self.type_into_field("iMessage", body, udid=udid)
+        if not typed_body.get("ok"):
+            return typed_body
+        screenshot = self.screenshot(udid=udid)
+        screenshot_path = (screenshot.get("data") or {}).get("path") if screenshot.get("ok") else None
+        send = self.find_element(text="Send", element_type="button", enabled=True, udid=udid)
+        if not send.get("ok"):
+            return send
+        element = send["data"]["element"]
+        payload = {"to": to, "body_length": len(body), "udid": udid, "send_element": element, "screenshot_before_send": screenshot_path}
+        prepared = self.policy.prepare("send_text", payload)
+        self._log_action("prepare_text", payload)
+        return {
+            **prepared,
+            "data": {"to": to, "body_length": len(body), "screenshot_before_send": screenshot_path, "send_element": element, "udid": udid},
+            "next_step": "Ask the user to approve sending this already-composed message, then call iphone_confirm_prepared_action with the token.",
+        }
+
+    def confirm_prepared_action(self, token: str, udid: str | None = None) -> dict[str, Any]:
+        confirmed = self.policy.confirm(token)
+        if not confirmed.get("ok"):
+            return confirmed
+        action = confirmed.get("action")
+        payload = confirmed.get("payload") or {}
+        if action != "send_text":
+            return confirmed
+        actual_udid = udid or payload.get("udid")
+        element = payload.get("send_element")
+        result = self.tap_element(element, udid=actual_udid) if isinstance(element, dict) else self.tap_text("Send", element_type="button", udid=actual_udid)
+        if result.get("ok"):
+            self._log_action("confirm_send_text", {"to": payload.get("to"), "body_length": payload.get("body_length"), "udid": actual_udid})
+            return {"ok": True, "action": action, "data": {"sent": True, "to": payload.get("to"), "body_length": payload.get("body_length"), "screenshot_before_send": payload.get("screenshot_before_send")}, "meta": result.get("meta", {})}
+        return result

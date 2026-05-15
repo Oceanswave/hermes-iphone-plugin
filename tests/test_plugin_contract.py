@@ -30,6 +30,8 @@ def test_register_exposes_native_iphone_tools_and_operator_skill():
         "iphone_tree",
         "iphone_find_element",
         "iphone_tap_text",
+        "iphone_tap_element",
+        "iphone_describe_screen",
         "iphone_wait_for_text",
         "iphone_type_into_field",
         "iphone_current_app",
