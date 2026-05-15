@@ -1,7 +1,7 @@
 import sys
 import types
 
-from hermes_iphone.backends import PyMobileDeviceBackend
+from hermes_iphone.backends import BackendResult, PyMobileDeviceBackend
 
 
 def test_pymobiledevice_backend_awaits_async_list_devices(monkeypatch):
@@ -63,12 +63,8 @@ def test_diagnostics_reports_wda_helper_and_readiness(monkeypatch, tmp_path):
     assert result.data["wda"]["ready"] is True
 
 
-def test_ensure_wda_uses_helper_when_wda_is_down(monkeypatch, tmp_path):
-    helper = tmp_path / "ensure-iphone-wda.sh"
-    helper.write_text("#!/usr/bin/env sh\necho wda-ready\n")
-    helper.chmod(0o755)
-    monkeypatch.setenv("HERMES_IPHONE_WDA_HELPER", str(helper))
-    calls = {"count": 0}
+def test_ensure_wda_uses_native_lifecycle_when_wda_is_down(monkeypatch, tmp_path):
+    calls = {"count": 0, "native": 0}
 
     def fake_ready(self, udid=None):
         calls["count"] += 1
@@ -76,10 +72,16 @@ def test_ensure_wda_uses_helper_when_wda_is_down(monkeypatch, tmp_path):
             return False, None, "down"
         return True, {"ready": True}, None
 
+    def fake_native(self, udid=None):
+        calls["native"] += 1
+        return BackendResult(ok=True, data={"started_wda": True})
+
     monkeypatch.setattr(PyMobileDeviceBackend, "_wda_ready", fake_ready)
+    monkeypatch.setattr(PyMobileDeviceBackend, "_ensure_wda_native", fake_native)
 
     result = PyMobileDeviceBackend().ensure_wda("UDID123")
 
     assert result.ok is True
     assert result.data["already_ready"] is False
-    assert result.data["helper_stdout"] == "wda-ready"
+    assert result.data["method"] == "native"
+    assert calls["native"] == 1

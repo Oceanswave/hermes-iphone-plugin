@@ -10,6 +10,13 @@ Native Hermes plugin for attached iPhone automation. The plugin exposes a static
 - `iphone_screenshot` — screenshot to a user-visible PNG path
 - `iphone_screen_info` — WDA window size, orientation, and status
 - `iphone_source` — WDA XML UI hierarchy/source tree
+- `iphone_tree` — compact semantic tree parsed from WDA source
+- `iphone_find_element` — find visible elements by text/type/enabled state
+- `iphone_tap_text` — tap a visible enabled element by label/name/value
+- `iphone_wait_for_text` — poll the UI tree until text appears
+- `iphone_type_into_field` — tap a field by label/name and type into it
+- `iphone_current_app` — report foreground app name and bundle id
+- `iphone_launch_or_focus` — launch an app unless it is already foreground
 - `iphone_open_url` — open a URL through WebInspector automation
 - `iphone_launch_app` — launch an app by bundle identifier through DVT ProcessControl
 - `iphone_tap` — coordinate tap through WDA
@@ -43,6 +50,8 @@ The plugin returns structured JSON errors when host/device prerequisites are mis
 
 WDA-backed controls call `iphone_ensure_wda` automatically when WDA is unreachable, then retry once. This covers common cases where WDA exits between commands.
 
+`iphone_ensure_wda` now prefers plugin-owned native lifecycle orchestration: it checks tunneld, starts tunneld if needed, launches the configured WDA runner, waits for readiness, and only falls back to a host helper script if the native path fails. The helper is compatibility fallback, not the primary user-facing workflow.
+
 Default helper path on Sean's host:
 
 ```bash
@@ -56,7 +65,23 @@ Useful manual commands:
 /home/oceanswave/.hermes/hermes-agent/venv/bin/python -m pymobiledevice3 developer wda status --tunnel 00008110-001855492644801E
 ```
 
-The helper is idempotent: it checks tunneld, starts it if needed, launches WebDriverAgentRunner if needed, waits for WDA readiness, then prints `wda-ready`.
+The helper remains idempotent: it checks tunneld, starts it if needed, launches WebDriverAgentRunner if needed, waits for WDA readiness, then prints `wda-ready`.
+
+## Semantic automation layer
+
+The semantic layer is built on `iphone_source` and avoids raw coordinate cruft for common UI tasks:
+
+```text
+iphone_tree             -> compact visible/accessibility-oriented element list
+iphone_find_element     -> locate elements by text, type, enabled/visible state
+iphone_tap_text         -> locate and tap an element center
+iphone_wait_for_text    -> poll until UI text appears
+iphone_type_into_field  -> tap a field/label and type text
+iphone_current_app      -> inspect foreground app from WDA source
+iphone_launch_or_focus  -> avoid relaunching an already-foreground app
+```
+
+Every semantic action records a small JSON action log under `~/iphone-action-logs`. Sensitive typed text is redacted to length metadata rather than persisted verbatim.
 
 ## Configuration
 

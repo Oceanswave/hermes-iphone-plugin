@@ -4,6 +4,7 @@ import asyncio
 import importlib.util
 import inspect
 import os
+import sys
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -273,10 +274,9 @@ class PyMobileDeviceBackend:
     def ensure_wda(self, udid: str | None = None) -> BackendResult:
         """Best-effort local recovery for WDA-backed controls.
 
-        The helper is intentionally outside the plugin package so the user can
-        tune the exact tunneld/WDA commands for their host without editing
-        Python code. It must be safe to call repeatedly and avoid duplicate
-        runners.
+        Prefer plugin-owned native lifecycle orchestration. A user-provided
+        shell helper remains as a compatibility fallback for hosts with special
+        sudo/tunneld requirements.
         """
         resolved_udid = self._default_udid(udid)
         ready, status, error = self._wda_ready(resolved_udid)
@@ -288,33 +288,93 @@ class PyMobileDeviceBackend:
             )
         if os.environ.get("HERMES_IPHONE_AUTO_WDA", "1").lower() in {"0", "false", "no", "off"}:
             return BackendResult(ok=False, error="auto_wda_disabled", message=error or "WDA is not ready and auto-WDA is disabled", meta={"backend": self.name})
+
+        native = self._ensure_wda_native(resolved_udid)
+        if native.ok:
+            retry_ready, retry_status, retry_error = self._wda_ready(resolved_udid)
+            if retry_ready:
+                native.data = {**(native.data or {}), "udid": resolved_udid, "wda_ready": True, "already_ready": False, "status": retry_status, "method": "native"}
+                return native
+
+        helper_result = self._ensure_wda_helper(resolved_udid)
+        if helper_result.ok:
+            retry_ready, retry_status, retry_error = self._wda_ready(resolved_udid)
+            if retry_ready:
+                helper_result.data = {**(helper_result.data or {}), "udid": resolved_udid, "wda_ready": True, "already_ready": False, "status": retry_status, "method": "helper"}
+                return helper_result
+        return helper_result if helper_result.error else native
+
+    def _ensure_wda_native(self, udid: str | None = None) -> BackendResult:
+        """Start tunneld/WDA without relying on an external helper script.
+
+        pymobiledevice3's long-running tunnel/XCTest entry points are CLI-backed
+        today, so this is process orchestration inside the plugin rather than a
+        separate shell helper. It is intentionally conservative and idempotent:
+        if tunneld/WDA are already ready, no duplicate process is launched.
+        """
+        started: list[str] = []
+        tunneld_ready, _, _ = self._tunneld_ready(udid)
+        if not tunneld_ready:
+            cmd = [
+                "sudo", "-n", sys.executable, "-m", "pymobiledevice3", "remote", "tunneld",
+                "--host", os.environ.get("HERMES_IPHONE_TUNNEL_HOST", "127.0.0.1"),
+                "--port", os.environ.get("HERMES_IPHONE_TUNNEL_PORT", "49151"),
+                "--protocol", os.environ.get("HERMES_IPHONE_TUNNEL_PROTOCOL", "tcp"),
+            ]
+            try:
+                subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                started.append("tunneld")
+            except Exception as exc:
+                return BackendResult(ok=False, error="native_tunneld_start_failed", message=str(exc) or exc.__class__.__name__, meta={"backend": self.name})
+
+        ready, status, _ = self._wda_ready(udid)
+        if ready:
+            return BackendResult(ok=True, data={"started": started, "started_wda": False, "status": status, "method": "native"}, meta={"backend": self.name})
+
+        cmd = [
+            sys.executable, "-m", "pymobiledevice3", "developer", "dvt", "xcuitest",
+            "--tunnel", udid or "",
+            "--output-log", os.environ.get("HERMES_IPHONE_WDA_LOG", str(Path.home() / "wda-xcuitest.log")),
+            self._wda_bundle_id(),
+        ]
+        cmd = [part for part in cmd if part != ""]
+        try:
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            started.append("wda")
+        except Exception as exc:
+            return BackendResult(ok=False, error="native_wda_start_failed", message=str(exc) or exc.__class__.__name__, meta={"backend": self.name})
+
+        for _ in range(30):
+            ready, status, error = self._wda_ready(udid)
+            if ready:
+                return BackendResult(ok=True, data={"started": started, "started_wda": True, "status": status, "method": "native"}, meta={"backend": self.name})
+            import time
+            time.sleep(1)
+        return BackendResult(ok=False, error="native_wda_start_timeout", message="Timed out waiting for WDA to become ready", data={"started": started}, meta={"backend": self.name})
+
+    def _ensure_wda_helper(self, udid: str | None = None) -> BackendResult:
         helper = self._helper_path()
         if not helper.exists():
             return BackendResult(ok=False, error="wda_helper_missing", message=f"WDA helper not found at {helper}", meta={"backend": self.name})
         cmd = [str(helper)]
-        if resolved_udid:
-            cmd.append(resolved_udid)
+        if udid:
+            cmd.append(udid)
         try:
             completed = subprocess.run(cmd, text=True, capture_output=True, timeout=45, check=False)
         except subprocess.TimeoutExpired as exc:
             return BackendResult(ok=False, error="wda_helper_timeout", message=f"WDA helper timed out after {exc.timeout}s", meta={"backend": self.name, "helper": str(helper)})
         except Exception as exc:
             return self._error("ensure_wda", exc)
-        retry_ready, retry_status, retry_error = self._wda_ready(resolved_udid)
         return BackendResult(
-            ok=completed.returncode == 0 and retry_ready,
+            ok=completed.returncode == 0,
             data={
-                "udid": resolved_udid,
-                "wda_ready": retry_ready,
-                "already_ready": False,
                 "helper": str(helper),
                 "helper_returncode": completed.returncode,
                 "helper_stdout": completed.stdout.strip()[-4000:],
                 "helper_stderr": completed.stderr.strip()[-4000:],
-                "status": retry_status,
             },
-            error=None if completed.returncode == 0 and retry_ready else "ensure_wda_failed",
-            message="" if completed.returncode == 0 and retry_ready else (retry_error or completed.stderr.strip() or completed.stdout.strip()),
+            error=None if completed.returncode == 0 else "ensure_wda_helper_failed",
+            message="" if completed.returncode == 0 else (completed.stderr.strip() or completed.stdout.strip()),
             meta={"backend": self.name},
         )
 
