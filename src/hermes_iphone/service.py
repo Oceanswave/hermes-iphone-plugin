@@ -230,6 +230,89 @@ class IphoneService:
             launched.setdefault("data", {})["already_foreground"] = False
         return launched
 
+    def snapshot_state(self, udid: str | None = None, include_screenshot: bool = False, limit: int = 30) -> dict[str, Any]:
+        tree_result = self._tree(udid=udid)
+        if not tree_result.get("ok"):
+            return tree_result
+        tree = tree_result["data"]["tree"]
+        payload: dict[str, Any] = {
+            "bundle_id": tree.get("bundle_id"),
+            "name": tree.get("name"),
+            "element_count": tree.get("element_count"),
+            "truncated": tree.get("truncated"),
+            "elements": tree.get("elements", [])[:limit],
+            "udid": udid,
+        }
+        if include_screenshot:
+            shot = self.screenshot(udid=udid)
+            payload["screenshot"] = (shot.get("data") or {}).get("path") if shot.get("ok") else None
+            if not shot.get("ok"):
+                payload["screenshot_error"] = shot.get("error") or shot.get("message")
+        return {"ok": True, "data": payload, "meta": {"backend": getattr(self.backend, "name", "unknown")}}
+
+    def select_suggestion(self, query: str, udid: str | None = None) -> dict[str, Any]:
+        tree_result = self._tree(udid=udid)
+        if not tree_result.get("ok"):
+            return tree_result
+        elements = (tree_result.get("data") or {}).get("tree", {}).get("elements", [])
+        normalized_query = query.strip().casefold()
+        candidates = []
+        for element in elements:
+            if element.get("type") not in {"cell", "button", "statictext"}:
+                continue
+            label = str(element.get("label") or element.get("name") or element.get("value") or "").strip()
+            normalized_label = label.casefold()
+            if normalized_query and normalized_query in normalized_label:
+                score = 0
+                if normalized_label == normalized_query:
+                    score += 100
+                elif normalized_label.startswith(normalized_query):
+                    score += 60
+                else:
+                    score += 25
+                if "maybe:" in normalized_label:
+                    score += 20
+                if element.get("type") == "cell":
+                    score += 10
+                candidates.append((score, element, label))
+        if not candidates:
+            return {"ok": False, "error": "suggestion_not_found", "message": f"No visible suggestion matched {query!r}", "data": {"query": query}}
+        candidates.sort(key=lambda item: -item[0])
+        _score, element, label = candidates[0]
+        tapped = self.tap_element(element, udid=udid)
+        if tapped.get("ok"):
+            tapped.setdefault("data", {})["suggestion"] = {"label": label, "element": element}
+        return tapped
+
+    def dismiss_keyboard(self, udid: str | None = None) -> dict[str, Any]:
+        for text in ("Done", "Hide keyboard", "Return"):
+            tapped = self.tap_text(text, udid=udid)
+            if tapped.get("ok"):
+                tapped.setdefault("data", {})["dismissed_by"] = text
+                return tapped
+        return {"ok": False, "error": "keyboard_dismiss_control_not_found", "message": "No visible Done/Hide keyboard/Return control was found.", "data": {"udid": udid}}
+
+    def go_back(self, udid: str | None = None) -> dict[str, Any]:
+        for text in ("Back", "Messages", "Cancel", "Close"):
+            found = self.find_element(text=text, element_type="button", enabled=True, udid=udid)
+            if found.get("ok"):
+                tapped = self.tap_element(found["data"]["element"], udid=udid)
+                if tapped.get("ok"):
+                    tapped.setdefault("data", {})["back_control"] = text
+                return tapped
+        return {"ok": False, "error": "back_control_not_found", "message": "No visible Back/Messages/Cancel/Close button was found.", "data": {"udid": udid}}
+
+    def recover_to_home_or_app(self, bundle_id: str | None = None, udid: str | None = None) -> dict[str, Any]:
+        home = self.press_button("home", udid=udid)
+        if not home.get("ok"):
+            return home
+        if not bundle_id:
+            return {"ok": True, "data": {"recovered_to": "home", "udid": udid}, "meta": home.get("meta", {})}
+        launched = self.launch_app(bundle_id=bundle_id, udid=udid)
+        if launched.get("ok"):
+            launched.setdefault("data", {})["recovered_from_home"] = True
+        return launched
+
     def prepare_text(self, to: str, body: str, udid: str | None = None) -> dict[str, Any]:
         launched = self.launch_or_focus("com.apple.MobileSMS", udid=udid)
         if not launched.get("ok"):
@@ -305,6 +388,129 @@ class IphoneService:
             "message": f"Recipient {to!r} is not visible as a verified Messages recipient; refusing to prepare Send.",
             "data": {"to": to, "tree": (tree_result.get("data") or {}).get("tree")},
         }
+
+    def open_messages_thread(self, contact: str, udid: str | None = None) -> dict[str, Any]:
+        launched = self.launch_or_focus("com.apple.MobileSMS", udid=udid)
+        if not launched.get("ok"):
+            return launched
+        visible = self.find_element(text=contact, element_type="cell", enabled=True, udid=udid)
+        if visible.get("ok"):
+            tapped = self.tap_element(visible["data"]["element"], udid=udid)
+            if tapped.get("ok"):
+                tapped.setdefault("data", {})["opened_thread"] = contact
+                tapped.setdefault("data", {})["method"] = "visible_thread_cell"
+            return tapped
+        search = self.find_element(text="Search", enabled=True, udid=udid)
+        if not search.get("ok"):
+            return {"ok": False, "error": "messages_thread_not_found", "message": f"No visible Messages thread or Search field matched {contact!r}.", "data": {"contact": contact, "launch": launched}}
+        tapped_search = self.tap_element(search["data"]["element"], udid=udid)
+        if not tapped_search.get("ok"):
+            return tapped_search
+        typed = self.type_text(contact, udid=udid)
+        if not typed.get("ok"):
+            return typed
+        time.sleep(0.5)
+        result = self.select_suggestion(contact, udid=udid)
+        if result.get("ok"):
+            result.setdefault("data", {})["opened_thread"] = contact
+            result.setdefault("data", {})["method"] = "search_suggestion"
+            return result
+        return {"ok": False, "error": "messages_thread_not_found", "message": f"Could not open Messages thread for {contact!r} after searching.", "data": {"contact": contact, "last": result}}
+
+    def read_recent_messages(self, limit: int = 10, udid: str | None = None) -> dict[str, Any]:
+        tree_result = self._tree(udid=udid)
+        if not tree_result.get("ok"):
+            return tree_result
+        tree = tree_result["data"]["tree"]
+        if tree.get("bundle_id") != "com.apple.MobileSMS":
+            return {"ok": False, "error": "messages_not_foreground", "message": "Messages is not the foreground app.", "data": {"bundle_id": tree.get("bundle_id"), "name": tree.get("name")}}
+        ignored = {"messages", "compose", "edit", "search", "send", "message", "imessage", "to:", "to", "back", "cancel"}
+        messages: list[dict[str, Any]] = []
+        for element in tree.get("elements", []):
+            label = str(element.get("label") or element.get("value") or element.get("name") or "").strip()
+            if not label or label.casefold() in ignored:
+                continue
+            if element.get("type") not in {"statictext", "cell", "textview", "textfield"}:
+                continue
+            bounds = element.get("bounds") or {}
+            try:
+                if int(bounds.get("y", 0)) < 120:
+                    continue
+            except Exception:
+                pass
+            direction = "unknown"
+            try:
+                center_x = int((element.get("center") or {}).get("x", 0))
+                width = int(bounds.get("width", 0))
+                if center_x and width:
+                    screen_mid = 390 / 2
+                    direction = "outbound" if center_x > screen_mid else "inbound"
+            except Exception:
+                direction = "unknown"
+            messages.append({"text": label, "direction": direction, "element": element})
+        recent = messages[-max(0, limit):]
+        return {"ok": True, "data": {"messages": recent, "count": len(recent), "available_count": len(messages), "udid": udid}, "meta": {"backend": getattr(self.backend, "name", "unknown")}}
+
+    def prepare_current_message_reply(self, body: str, udid: str | None = None) -> dict[str, Any]:
+        current = self.current_app(udid=udid)
+        if not current.get("ok"):
+            return current
+        if (current.get("data") or {}).get("bundle_id") != "com.apple.MobileSMS":
+            return {"ok": False, "error": "messages_not_foreground", "message": "Open a Messages thread before preparing a reply.", "data": current.get("data")}
+        body_field = None
+        for candidate in ("iMessage", "Message", "messageBodyField"):
+            typed_body = self.type_into_field(candidate, body, udid=udid)
+            if typed_body.get("ok"):
+                body_field = typed_body
+                break
+        if body_field is None:
+            return typed_body
+        screenshot = self.screenshot(udid=udid)
+        screenshot_path = (screenshot.get("data") or {}).get("path") if screenshot.get("ok") else None
+        send = self.find_element(text="Send", element_type="button", enabled=True, udid=udid)
+        if not send.get("ok"):
+            return send
+        element = send["data"]["element"]
+        context = self.read_recent_messages(limit=5, udid=udid)
+        payload = {"to": "current Messages thread", "body_length": len(body), "udid": udid, "send_element": element, "screenshot_before_send": screenshot_path, "thread_context": (context.get("data") or {})}
+        prepared = self.policy.prepare("send_text", payload)
+        self._log_action("prepare_current_message_reply", {"to": payload["to"], "body_length": len(body), "udid": udid, "send_element": element, "screenshot_before_send": screenshot_path})
+        return {
+            **prepared,
+            "data": {"to": payload["to"], "body_length": len(body), "screenshot_before_send": screenshot_path, "send_element": element, "thread_context": payload["thread_context"], "udid": udid},
+            "next_step": "Ask the user to approve sending this reply, then call iphone_confirm_prepared_action with the token.",
+        }
+
+    def reply_current_message_thread(
+        self,
+        body: str,
+        udid: str | None = None,
+        approval_fn: Callable[..., str] | None = None,
+    ) -> dict[str, Any]:
+        prepared = self.prepare_current_message_reply(body=body, udid=udid)
+        if not prepared.get("ok"):
+            return prepared
+        approval = self._request_send_approval(
+            command=f"Send iMessage/SMS reply in current thread ({len(body)} characters)",
+            description="reply_current_message_thread",
+            approval_fn=approval_fn,
+        )
+        if approval not in {"once", "session", "always"}:
+            error = "approval_denied" if approval == "deny" else "approval_required"
+            return {
+                "ok": False,
+                "error": error,
+                "approval": approval,
+                "message": "Hermes approval denied or is unavailable; the reply draft remains unsent.",
+                "staged": True,
+                "token": prepared.get("token"),
+                "data": prepared.get("data"),
+                "next_step": "Use the fallback token with iphone_confirm_prepared_action only after explicit approval.",
+            }
+        sent = self.confirm_prepared_action(prepared["token"], udid=udid)
+        if sent.get("ok"):
+            sent["approval"] = approval
+        return sent
 
     def send_text(
         self,

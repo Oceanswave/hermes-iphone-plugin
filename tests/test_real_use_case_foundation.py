@@ -34,6 +34,20 @@ SELECTED_SUGGESTION_SOURCE = '''<AppiumAUT type="XCUIElementTypeApplication" nam
   <XCUIElementTypeButton type="XCUIElementTypeButton" name="sendButton" label="Send" visible="true" enabled="true" x="818" y="214" width="39" height="28" />
 </AppiumAUT>'''
 
+THREAD_LIST_SOURCE = '''<AppiumAUT type="XCUIElementTypeApplication" name="Messages" label="Messages" bundleId="com.apple.MobileSMS" visible="true" enabled="true" x="0" y="0" width="390" height="844">
+  <XCUIElementTypeTextField type="XCUIElementTypeSearchField" name="Search" label="Search" value="" visible="true" enabled="true" x="16" y="80" width="358" height="36" />
+  <XCUIElementTypeCell type="XCUIElementTypeCell" name="Sean McLellan, Hey, this is Rocky., 12:56 AM" label="Sean McLellan, Hey, this is Rocky., 12:56 AM" visible="true" enabled="true" x="16" y="138" width="358" height="87" />
+</AppiumAUT>'''
+
+OPEN_THREAD_SOURCE = '''<AppiumAUT type="XCUIElementTypeApplication" name="Messages" label="Messages" bundleId="com.apple.MobileSMS" visible="true" enabled="true" x="0" y="0" width="390" height="844">
+  <XCUIElementTypeButton type="XCUIElementTypeButton" name="Messages" label="Messages" visible="true" enabled="true" x="8" y="20" width="90" height="44" />
+  <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="Sean McLellan" label="Sean McLellan" visible="true" enabled="true" x="120" y="42" width="150" height="24" />
+  <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="Incoming hello" label="Incoming hello" visible="true" enabled="true" x="28" y="590" width="160" height="44" />
+  <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="Outgoing yep" label="Outgoing yep" visible="true" enabled="true" x="210" y="650" width="150" height="44" />
+  <XCUIElementTypeTextField type="XCUIElementTypeTextField" name="messageBodyField" label="Message" value="" visible="true" enabled="true" x="20" y="760" width="300" height="44" />
+  <XCUIElementTypeButton type="XCUIElementTypeButton" name="sendButton" label="Send" visible="true" enabled="true" x="330" y="760" width="44" height="44" />
+</AppiumAUT>'''
+
 
 class FakeBackend:
     name = "fake"
@@ -42,6 +56,7 @@ class FakeBackend:
         self.taps = []
         self.typed = []
         self.launched = []
+        self.pressed = []
         self.screenshots = 0
 
     def source(self, udid=None):
@@ -63,6 +78,10 @@ class FakeBackend:
         self.launched.append(bundle_id)
         return BackendResult(ok=True, data={"bundle_id": bundle_id, "udid": udid})
 
+    def press_button(self, button, udid=None):
+        self.pressed.append(button)
+        return BackendResult(ok=True, data={"button": button, "udid": udid})
+
 
 class MessageLabelBackend(FakeBackend):
     def source(self, udid=None):
@@ -83,6 +102,18 @@ class SuggestionBackend(FakeBackend):
         if self.typed:
             return BackendResult(ok=True, data={"source": SUGGESTION_SOURCE, "udid": udid})
         return super().source(udid=udid)
+
+
+class ThreadListBackend(FakeBackend):
+    def source(self, udid=None):
+        if self.taps:
+            return BackendResult(ok=True, data={"source": OPEN_THREAD_SOURCE, "udid": udid})
+        return BackendResult(ok=True, data={"source": THREAD_LIST_SOURCE, "udid": udid})
+
+
+class OpenThreadBackend(FakeBackend):
+    def source(self, udid=None):
+        return BackendResult(ok=True, data={"source": OPEN_THREAD_SOURCE, "udid": udid})
 
 
 def test_tap_element_by_id_uses_current_tree_and_logs_trace(tmp_path):
@@ -237,3 +268,77 @@ def test_prepare_text_selects_matching_messages_contact_suggestion_before_send(t
     assert result["data"]["recipient"]["verified_by"] == "contact_suggestion"
     assert result["data"]["recipient"]["display"] == "Sean McLellan"
     assert (837, 228) not in backend.taps
+
+
+def test_snapshot_state_can_include_screenshot_without_body_leaks(tmp_path):
+    backend = FakeBackend()
+    service = IphoneService(backend=backend, action_log_root=tmp_path / "logs", trace_root=tmp_path / "traces")
+
+    result = service.snapshot_state(include_screenshot=True, limit=2, udid="UDID")
+
+    assert result["ok"] is True
+    assert result["data"]["bundle_id"] == "com.apple.MobileSMS"
+    assert result["data"]["screenshot"] == "/tmp/screenshot-1.png"
+    assert len(result["data"]["elements"]) == 2
+
+
+def test_select_suggestion_taps_best_visible_cell(tmp_path):
+    backend = SuggestionBackend()
+    service = IphoneService(backend=backend, action_log_root=tmp_path / "logs", trace_root=tmp_path / "traces")
+    backend.typed.append("Sean")
+
+    result = service.select_suggestion("Sean", udid="UDID")
+
+    assert result["ok"] is True
+    assert backend.taps == [(625, 99)]
+    assert result["data"]["suggestion"]["label"] == "Maybe: Sean McLellan"
+
+
+def test_recover_to_home_or_app_presses_home_then_launches_target(tmp_path):
+    backend = FakeBackend()
+    service = IphoneService(backend=backend, action_log_root=tmp_path / "logs", trace_root=tmp_path / "traces")
+
+    result = service.recover_to_home_or_app(bundle_id="com.apple.MobileSMS", udid="UDID")
+
+    assert result["ok"] is True
+    assert backend.pressed == ["home"]
+    assert backend.launched == ["com.apple.MobileSMS"]
+    assert result["data"]["recovered_from_home"] is True
+
+
+def test_open_messages_thread_taps_visible_thread_cell(tmp_path):
+    backend = ThreadListBackend()
+    service = IphoneService(backend=backend, action_log_root=tmp_path / "logs", trace_root=tmp_path / "traces")
+
+    result = service.open_messages_thread("Sean", udid="UDID")
+
+    assert result["ok"] is True
+    assert result["data"]["opened_thread"] == "Sean"
+    assert result["data"]["method"] == "visible_thread_cell"
+    assert backend.taps == [(195, 181)]
+
+
+def test_read_recent_messages_filters_controls_and_keeps_visible_bubbles(tmp_path):
+    service = IphoneService(backend=OpenThreadBackend(), action_log_root=tmp_path / "logs", trace_root=tmp_path / "traces")
+
+    result = service.read_recent_messages(limit=2, udid="UDID")
+
+    assert result["ok"] is True
+    assert [m["text"] for m in result["data"]["messages"]] == ["Incoming hello", "Outgoing yep"]
+    assert result["data"]["messages"][0]["direction"] == "inbound"
+    assert result["data"]["messages"][1]["direction"] == "outbound"
+
+
+def test_prepare_current_message_reply_stages_without_tapping_send(tmp_path):
+    backend = OpenThreadBackend()
+    service = IphoneService(backend=backend, action_log_root=tmp_path / "logs", trace_root=tmp_path / "traces")
+
+    result = service.prepare_current_message_reply("reply body", udid="UDID")
+
+    assert result["ok"] is True
+    assert result["requires_confirmation"] is True
+    assert result["data"]["to"] == "current Messages thread"
+    assert result["data"]["body_length"] == 10
+    assert backend.typed == ["reply body"]
+    assert (352, 782) not in backend.taps
+    assert result["data"]["thread_context"]["count"] == 2

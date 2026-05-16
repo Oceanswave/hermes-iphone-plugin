@@ -24,7 +24,16 @@ def test_register_registers_tools_and_skill():
     assert "iphone_screenshot" in names
     assert "iphone_send_text" in names
     assert "iphone_confirm_prepared_action" in names
-    assert len(names) == 26
+    assert "iphone_snapshot_state" in names
+    assert "iphone_select_suggestion" in names
+    assert "iphone_dismiss_keyboard" in names
+    assert "iphone_go_back" in names
+    assert "iphone_recover_to_home_or_app" in names
+    assert "iphone_open_messages_thread" in names
+    assert "iphone_read_recent_messages" in names
+    assert "iphone_prepare_current_message_reply" in names
+    assert "iphone_reply_current_message_thread" in names
+    assert len(names) == 35
     assert calls["skills"]
 
 
