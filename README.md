@@ -97,10 +97,12 @@ Trace folders live under `~/iphone-traces` and include metadata plus compact UI 
 1. launch/focus Messages (`com.apple.MobileSMS`)
 2. tap Compose
 3. type recipient
-4. type body
-5. capture a screenshot before send
-6. locate Send
-7. return a one-time token
+4. tap a matching iOS contact suggestion when one appears, such as `Maybe: Sean McLellan`
+5. type body
+6. verify the recipient is still visible as a resolved Messages recipient/token
+7. capture a screenshot before send
+8. locate Send
+9. return a one-time token
 
 It never taps Send. It also does not persist the message body in action logs or traces; logs keep body length and recipient metadata only.
 

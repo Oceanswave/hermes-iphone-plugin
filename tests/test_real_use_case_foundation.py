@@ -21,6 +21,19 @@ UNRESOLVED_RECIPIENT_SOURCE = '''<AppiumAUT type="XCUIElementTypeApplication" na
   <XCUIElementTypeButton type="XCUIElementTypeButton" name="sendButton" label="Send" visible="true" enabled="true" x="818" y="214" width="39" height="28" />
 </AppiumAUT>'''
 
+SUGGESTION_SOURCE = '''<AppiumAUT type="XCUIElementTypeApplication" name="Messages" label="Messages" bundleId="com.apple.MobileSMS" visible="true" enabled="true" x="0" y="0" width="926" height="428">
+  <XCUIElementTypeTextField type="XCUIElementTypeTextField" name="To:" label="To:" value="Sean" visible="true" enabled="true" x="397" y="24" width="457" height="44" />
+  <XCUIElementTypeCell type="XCUIElementTypeCell" name="Maybe: Sean McLellan" label="Maybe: Sean McLellan" visible="true" enabled="true" x="397" y="72" width="457" height="54" />
+  <XCUIElementTypeTextField type="XCUIElementTypeTextField" name="messageBodyField" label="Message" value="" visible="true" enabled="true" x="446" y="207" width="373" height="41" />
+  <XCUIElementTypeButton type="XCUIElementTypeButton" name="sendButton" label="Send" visible="true" enabled="true" x="818" y="214" width="39" height="28" />
+</AppiumAUT>'''
+
+SELECTED_SUGGESTION_SOURCE = '''<AppiumAUT type="XCUIElementTypeApplication" name="Messages" label="Messages" bundleId="com.apple.MobileSMS" visible="true" enabled="true" x="0" y="0" width="926" height="428">
+  <XCUIElementTypeTextField type="XCUIElementTypeTextField" name="To:" label="To:" value="Sean McLellan" visible="true" enabled="true" x="397" y="24" width="457" height="44" />
+  <XCUIElementTypeTextField type="XCUIElementTypeTextField" name="messageBodyField" label="Message" value="" visible="true" enabled="true" x="446" y="207" width="373" height="41" />
+  <XCUIElementTypeButton type="XCUIElementTypeButton" name="sendButton" label="Send" visible="true" enabled="true" x="818" y="214" width="39" height="28" />
+</AppiumAUT>'''
+
 
 class FakeBackend:
     name = "fake"
@@ -60,6 +73,15 @@ class UnresolvedRecipientBackend(FakeBackend):
     def source(self, udid=None):
         if self.typed:
             return BackendResult(ok=True, data={"source": UNRESOLVED_RECIPIENT_SOURCE, "udid": udid})
+        return super().source(udid=udid)
+
+
+class SuggestionBackend(FakeBackend):
+    def source(self, udid=None):
+        if (625, 99) in self.taps:
+            return BackendResult(ok=True, data={"source": SELECTED_SUGGESTION_SOURCE, "udid": udid})
+        if self.typed:
+            return BackendResult(ok=True, data={"source": SUGGESTION_SOURCE, "udid": udid})
         return super().source(udid=udid)
 
 
@@ -200,4 +222,18 @@ def test_prepare_text_rejects_unresolved_literal_recipient_before_send(tmp_path)
     assert result["error"] == "recipient_not_verified"
     assert "Sean" in result["message"]
     assert not result.get("token")
+    assert (837, 228) not in backend.taps
+
+
+def test_prepare_text_selects_matching_messages_contact_suggestion_before_send(tmp_path):
+    backend = SuggestionBackend()
+    service = IphoneService(backend=backend, action_log_root=tmp_path / "logs", trace_root=tmp_path / "traces")
+
+    result = service.prepare_text(to="Sean", body="Hey, this is Rocky.", udid="UDID")
+
+    assert result["ok"] is True
+    assert result["requires_confirmation"] is True
+    assert (625, 99) in backend.taps
+    assert result["data"]["recipient"]["verified_by"] == "contact_suggestion"
+    assert result["data"]["recipient"]["display"] == "Sean McLellan"
     assert (837, 228) not in backend.taps

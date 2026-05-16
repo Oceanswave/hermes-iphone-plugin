@@ -238,6 +238,9 @@ class IphoneService:
         typed_to = self.type_into_field("To:", to, udid=udid)
         if not typed_to.get("ok"):
             return typed_to
+        selected_recipient = self._select_text_recipient_suggestion(to=to, udid=udid)
+        if not selected_recipient.get("ok") and selected_recipient.get("error") != "recipient_suggestion_not_found":
+            return selected_recipient
         body_field = None
         for candidate in ("iMessage", "Message", "messageBodyField"):
             typed_body = self.type_into_field(candidate, body, udid=udid)
@@ -249,20 +252,38 @@ class IphoneService:
         recipient_check = self._verify_text_recipient(to=to, udid=udid)
         if not recipient_check.get("ok"):
             return recipient_check
+        recipient = recipient_check.get("data") or {}
         screenshot = self.screenshot(udid=udid)
         screenshot_path = (screenshot.get("data") or {}).get("path") if screenshot.get("ok") else None
         send = self.find_element(text="Send", element_type="button", enabled=True, udid=udid)
         if not send.get("ok"):
             return send
         element = send["data"]["element"]
-        payload = {"to": to, "body_length": len(body), "udid": udid, "send_element": element, "screenshot_before_send": screenshot_path}
+        payload = {"to": to, "body_length": len(body), "udid": udid, "send_element": element, "screenshot_before_send": screenshot_path, "recipient": recipient}
         prepared = self.policy.prepare("send_text", payload)
         self._log_action("prepare_text", payload)
         return {
             **prepared,
-            "data": {"to": to, "body_length": len(body), "screenshot_before_send": screenshot_path, "send_element": element, "udid": udid},
+            "data": {"to": to, "body_length": len(body), "screenshot_before_send": screenshot_path, "send_element": element, "recipient": recipient, "udid": udid},
             "next_step": "Ask the user to approve sending this already-composed message, then call iphone_confirm_prepared_action with the token.",
         }
+
+    def _select_text_recipient_suggestion(self, to: str, udid: str | None = None) -> dict[str, Any]:
+        tree_result = self._tree(udid=udid)
+        if not tree_result.get("ok"):
+            return tree_result
+        elements = (tree_result.get("data") or {}).get("tree", {}).get("elements", [])
+        query = to.strip().lower()
+        for element in elements:
+            label = str(element.get("label") or element.get("name") or "").strip()
+            normalized = label.lower()
+            if element.get("type") in {"cell", "button"} and query and query in normalized and ("maybe:" in normalized or normalized != query):
+                tapped = self.tap_element(element, udid=udid)
+                if not tapped.get("ok"):
+                    return tapped
+                display = label.split(":", 1)[1].strip() if ":" in label else label
+                return {"ok": True, "data": {"verified_by": "contact_suggestion", "display": display, "element": element}}
+        return {"ok": False, "error": "recipient_suggestion_not_found", "message": f"No Messages contact suggestion matched {to!r}"}
 
     def _verify_text_recipient(self, to: str, udid: str | None = None) -> dict[str, Any]:
         tree_result = self._tree(udid=udid)
@@ -273,9 +294,11 @@ class IphoneService:
         for element in elements:
             label = str(element.get("label") or element.get("name") or "").strip().lower()
             value = str(element.get("value") or "").strip().lower()
+            raw_value = str(element.get("value") or "").strip()
             if element.get("type") in {"textfield", "textview", "searchfield"} and label in {"to:", "to"}:
                 if not value or query in value:
-                    return {"ok": True, "data": {"recipient_element": element, "verified_by": "to_field"}}
+                    verified_by = "contact_suggestion" if value and value != query else "to_field"
+                    return {"ok": True, "data": {"recipient_element": element, "verified_by": verified_by, "display": raw_value or to}}
         return {
             "ok": False,
             "error": "recipient_not_verified",

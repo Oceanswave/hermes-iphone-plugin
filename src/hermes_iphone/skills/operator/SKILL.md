@@ -62,6 +62,7 @@ Semantic automation notes:
 
 Safe Messages flow:
 - `iphone_prepare_text` now opens/focuses Messages, taps Compose, types recipient/body, captures a screenshot before send, locates Send, and returns a token.
+- Before staging Send, recipient selection must be verified: tap matching iOS contact suggestions such as `Maybe: Sean McLellan` when present, then require a visible resolved Messages recipient/token. Refuse unresolved literal free-text recipients.
 - `iphone_send_text` is the high-level flow: it calls `iphone_prepare_text`, asks Hermes' built-in dangerous-action approval, then consumes the token and taps Send only if approval returns `once`, `session`, or `always`.
 - The iPhone must be unlocked and awake before this flow; iOS denies launching Messages while locked.
 - App launches are WDA-first. A locked phone returns `device_locked` quickly/actionably and should not fall back through slower DVT launch attempts.
