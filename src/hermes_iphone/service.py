@@ -238,8 +238,13 @@ class IphoneService:
         typed_to = self.type_into_field("To:", to, udid=udid)
         if not typed_to.get("ok"):
             return typed_to
-        typed_body = self.type_into_field("iMessage", body, udid=udid)
-        if not typed_body.get("ok"):
+        body_field = None
+        for candidate in ("iMessage", "Message", "messageBodyField"):
+            typed_body = self.type_into_field(candidate, body, udid=udid)
+            if typed_body.get("ok"):
+                body_field = typed_body
+                break
+        if body_field is None:
             return typed_body
         screenshot = self.screenshot(udid=udid)
         screenshot_path = (screenshot.get("data") or {}).get("path") if screenshot.get("ok") else None

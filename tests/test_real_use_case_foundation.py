@@ -9,6 +9,12 @@ SOURCE = '''<AppiumAUT type="XCUIElementTypeApplication" name="Messages" label="
   <XCUIElementTypeButton type="XCUIElementTypeButton" name="Send" label="Send" visible="true" enabled="true" x="330" y="760" width="44" height="44" />
 </AppiumAUT>'''
 
+MESSAGE_LABEL_SOURCE = '''<AppiumAUT type="XCUIElementTypeApplication" name="Messages" label="Messages" bundleId="com.apple.MobileSMS" visible="true" enabled="true" x="0" y="0" width="926" height="428">
+  <XCUIElementTypeTextField type="XCUIElementTypeTextField" name="To:" label="To:" value="Sean" visible="true" enabled="true" x="397" y="24" width="457" height="44" />
+  <XCUIElementTypeTextField type="XCUIElementTypeTextField" name="messageBodyField" label="Message" value="" visible="true" enabled="true" x="446" y="207" width="373" height="41" />
+  <XCUIElementTypeButton type="XCUIElementTypeButton" name="sendButton" label="Send" visible="true" enabled="true" x="818" y="214" width="39" height="28" />
+</AppiumAUT>'''
+
 
 class FakeBackend:
     name = "fake"
@@ -39,6 +45,11 @@ class FakeBackend:
         return BackendResult(ok=True, data={"bundle_id": bundle_id, "udid": udid})
 
 
+class MessageLabelBackend(FakeBackend):
+    def source(self, udid=None):
+        return BackendResult(ok=True, data={"source": MESSAGE_LABEL_SOURCE, "udid": udid})
+
+
 def test_tap_element_by_id_uses_current_tree_and_logs_trace(tmp_path):
     backend = FakeBackend()
     service = IphoneService(backend=backend, action_log_root=tmp_path / "logs", trace_root=tmp_path / "traces")
@@ -66,7 +77,7 @@ def test_prepare_text_composes_message_but_does_not_tap_send_and_redacts_body(tm
     backend = FakeBackend()
     service = IphoneService(backend=backend, action_log_root=tmp_path / "logs", trace_root=tmp_path / "traces")
 
-    result = service.prepare_text(to="+15551234567", body="super secret", udid="UDID")
+    result = service.prepare_text(to="+155****4567", body="super secret", udid="UDID")
 
     assert result["ok"] is True
     assert result["requires_confirmation"] is True
@@ -76,7 +87,7 @@ def test_prepare_text_composes_message_but_does_not_tap_send_and_redacts_body(tm
     assert "super secret" not in str(result)
     send_center = (352, 782)
     assert send_center not in backend.taps
-    assert backend.typed == ["+15551234567", "super secret"]
+    assert backend.typed == ["+155****4567", "super secret"]
 
     for path in (tmp_path / "logs").glob("*.json"):
         assert "super secret" not in path.read_text()
@@ -96,3 +107,26 @@ def test_confirm_prepared_text_taps_send_once_and_consumes_token(tmp_path):
     again = service.confirm_prepared_action(prepared["token"], udid="UDID")
     assert again["ok"] is False
     assert again["error"] == "unknown_or_expired_token"
+
+
+def test_type_into_field_prefers_exact_input_over_root_app_match(tmp_path):
+    backend = MessageLabelBackend()
+    service = IphoneService(backend=backend, action_log_root=tmp_path / "logs", trace_root=tmp_path / "traces")
+
+    result = service.type_into_field("Message", "hello", udid="UDID")
+
+    assert result["ok"] is True
+    assert result["data"]["field"]["type"] == "textfield"
+    assert result["data"]["field"]["label"] == "Message"
+    assert backend.taps == [(632, 227)]
+
+
+def test_prepare_text_accepts_message_body_field_label(tmp_path):
+    backend = MessageLabelBackend()
+    service = IphoneService(backend=backend, action_log_root=tmp_path / "logs", trace_root=tmp_path / "traces")
+
+    result = service.prepare_text(to="Sean", body="hello", udid="UDID")
+
+    assert result["ok"] is True
+    assert result["requires_confirmation"] is True
+    assert backend.typed[-1] == "hello"

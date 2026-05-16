@@ -98,11 +98,30 @@ def compact_tree_from_xml(xml: str, *, visible_only: bool = True, limit: int = 2
     }
 
 
+def _match_score(element: dict[str, Any], query: str) -> int:
+    if not query:
+        return 0
+    values = [str(element.get(k) or "").casefold() for k in ("label", "name", "value")]
+    element_type = str(element.get("type", "")).casefold()
+    score = 0
+    if any(value == query for value in values):
+        score += 100
+    elif any(value.startswith(query) for value in values):
+        score += 60
+    elif any(query in value for value in values):
+        score += 25
+    if element_type in INPUT_TYPES:
+        score += 20
+    if element.get("accessible"):
+        score += 5
+    return score
+
+
 def find_elements(tree: dict[str, Any], *, text: str | None = None, element_type: str | None = None, enabled: bool | None = None, visible: bool | None = True, limit: int = 10) -> list[dict[str, Any]]:
     query = (text or "").casefold()
     wanted_type = element_type.replace("XCUIElementType", "").casefold() if element_type else None
-    matches = []
-    for element in tree.get("elements", []):
+    scored_matches: list[tuple[int, int, dict[str, Any]]] = []
+    for idx, element in enumerate(tree.get("elements", [])):
         if visible is not None and bool(element.get("visible")) is not visible:
             continue
         if enabled is not None and bool(element.get("enabled")) is not enabled:
@@ -112,10 +131,9 @@ def find_elements(tree: dict[str, Any], *, text: str | None = None, element_type
         haystack = " ".join(str(element.get(k) or "") for k in ("label", "name", "value")).casefold()
         if query and query not in haystack:
             continue
-        matches.append(element)
-        if len(matches) >= limit:
-            break
-    return matches
+        scored_matches.append((_match_score(element, query), idx, element))
+    scored_matches.sort(key=lambda item: (-item[0], item[1]))
+    return [element for _score, _idx, element in scored_matches[:limit]]
 
 
 def first_element(tree: dict[str, Any], **kwargs: Any) -> dict[str, Any] | None:
