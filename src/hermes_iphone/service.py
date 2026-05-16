@@ -246,6 +246,9 @@ class IphoneService:
                 break
         if body_field is None:
             return typed_body
+        recipient_check = self._verify_text_recipient(to=to, udid=udid)
+        if not recipient_check.get("ok"):
+            return recipient_check
         screenshot = self.screenshot(udid=udid)
         screenshot_path = (screenshot.get("data") or {}).get("path") if screenshot.get("ok") else None
         send = self.find_element(text="Send", element_type="button", enabled=True, udid=udid)
@@ -259,6 +262,25 @@ class IphoneService:
             **prepared,
             "data": {"to": to, "body_length": len(body), "screenshot_before_send": screenshot_path, "send_element": element, "udid": udid},
             "next_step": "Ask the user to approve sending this already-composed message, then call iphone_confirm_prepared_action with the token.",
+        }
+
+    def _verify_text_recipient(self, to: str, udid: str | None = None) -> dict[str, Any]:
+        tree_result = self._tree(udid=udid)
+        if not tree_result.get("ok"):
+            return tree_result
+        elements = (tree_result.get("data") or {}).get("tree", {}).get("elements", [])
+        query = to.strip().lower()
+        for element in elements:
+            label = str(element.get("label") or element.get("name") or "").strip().lower()
+            value = str(element.get("value") or "").strip().lower()
+            if element.get("type") in {"textfield", "textview", "searchfield"} and label in {"to:", "to"}:
+                if not value or query in value:
+                    return {"ok": True, "data": {"recipient_element": element, "verified_by": "to_field"}}
+        return {
+            "ok": False,
+            "error": "recipient_not_verified",
+            "message": f"Recipient {to!r} is not visible as a verified Messages recipient; refusing to prepare Send.",
+            "data": {"to": to, "tree": (tree_result.get("data") or {}).get("tree")},
         }
 
     def send_text(

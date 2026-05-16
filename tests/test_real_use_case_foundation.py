@@ -15,6 +15,12 @@ MESSAGE_LABEL_SOURCE = '''<AppiumAUT type="XCUIElementTypeApplication" name="Mes
   <XCUIElementTypeButton type="XCUIElementTypeButton" name="sendButton" label="Send" visible="true" enabled="true" x="818" y="214" width="39" height="28" />
 </AppiumAUT>'''
 
+UNRESOLVED_RECIPIENT_SOURCE = '''<AppiumAUT type="XCUIElementTypeApplication" name="Messages" label="Messages" bundleId="com.apple.MobileSMS" visible="true" enabled="true" x="0" y="0" width="926" height="428">
+  <XCUIElementTypeCell type="XCUIElementTypeCell" name="sean, Hey, this is Rocky., 12:56 AM" label="sean, Hey, this is Rocky., 12:56 AM" visible="true" enabled="true" x="63" y="138" width="288" height="87" />
+  <XCUIElementTypeTextField type="XCUIElementTypeTextField" name="messageBodyField" label="Message" value="" visible="true" enabled="true" x="446" y="207" width="373" height="41" />
+  <XCUIElementTypeButton type="XCUIElementTypeButton" name="sendButton" label="Send" visible="true" enabled="true" x="818" y="214" width="39" height="28" />
+</AppiumAUT>'''
+
 
 class FakeBackend:
     name = "fake"
@@ -48,6 +54,13 @@ class FakeBackend:
 class MessageLabelBackend(FakeBackend):
     def source(self, udid=None):
         return BackendResult(ok=True, data={"source": MESSAGE_LABEL_SOURCE, "udid": udid})
+
+
+class UnresolvedRecipientBackend(FakeBackend):
+    def source(self, udid=None):
+        if self.typed:
+            return BackendResult(ok=True, data={"source": UNRESOLVED_RECIPIENT_SOURCE, "udid": udid})
+        return super().source(udid=udid)
 
 
 def test_tap_element_by_id_uses_current_tree_and_logs_trace(tmp_path):
@@ -175,3 +188,16 @@ def test_send_text_cli_unavailable_approval_has_actionable_non_gateway_message(t
     assert result["approval"] == "unavailable"
     assert "fallback token" in result["message"]
     assert "/approve" not in result["message"]
+
+
+def test_prepare_text_rejects_unresolved_literal_recipient_before_send(tmp_path):
+    backend = UnresolvedRecipientBackend()
+    service = IphoneService(backend=backend, action_log_root=tmp_path / "logs", trace_root=tmp_path / "traces")
+
+    result = service.prepare_text(to="Sean", body="Hey, this is Rocky.", udid="UDID")
+
+    assert result["ok"] is False
+    assert result["error"] == "recipient_not_verified"
+    assert "Sean" in result["message"]
+    assert not result.get("token")
+    assert (837, 228) not in backend.taps
