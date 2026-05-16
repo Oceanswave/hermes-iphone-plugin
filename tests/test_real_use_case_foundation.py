@@ -48,6 +48,14 @@ OPEN_THREAD_SOURCE = '''<AppiumAUT type="XCUIElementTypeApplication" name="Messa
   <XCUIElementTypeButton type="XCUIElementTypeButton" name="sendButton" label="Send" visible="true" enabled="true" x="330" y="760" width="44" height="44" />
 </AppiumAUT>'''
 
+SPLIT_THREAD_SOURCE = '''<AppiumAUT type="XCUIElementTypeApplication" name="Messages" label="Messages" bundleId="com.apple.MobileSMS" visible="true" enabled="true" x="0" y="0" width="926" height="428">
+  <XCUIElementTypeCell type="XCUIElementTypeCell" name="Sean McLellan, sidebar preview" label="Sean McLellan, sidebar preview" visible="true" enabled="true" x="63" y="138" width="288" height="87" />
+  <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="sidebar preview" label="sidebar preview" value="sidebar preview" visible="true" enabled="true" x="89" y="169" width="246" height="44" />
+  <XCUIElementTypeTextField type="XCUIElementTypeTextField" name="messageBodyField" label="Message" value="iMessage" visible="true" enabled="true" x="446" y="207" width="373" height="41" />
+  <XCUIElementTypeTextView type="XCUIElementTypeTextView" name="CKBalloonTextView" label="CKBalloonTextView" value="Actual right-pane message" visible="true" enabled="true" x="498" y="130" width="356" height="60" />
+  <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="‎Read 1:36 PM" label="‎Read 1:36 PM" value="‎Read 1:36 PM" visible="true" enabled="true" x="769" y="177" width="74" height="14" />
+</AppiumAUT>'''
+
 
 class FakeBackend:
     name = "fake"
@@ -114,6 +122,11 @@ class ThreadListBackend(FakeBackend):
 class OpenThreadBackend(FakeBackend):
     def source(self, udid=None):
         return BackendResult(ok=True, data={"source": OPEN_THREAD_SOURCE, "udid": udid})
+
+
+class SplitThreadBackend(FakeBackend):
+    def source(self, udid=None):
+        return BackendResult(ok=True, data={"source": SPLIT_THREAD_SOURCE, "udid": udid})
 
 
 def test_tap_element_by_id_uses_current_tree_and_logs_trace(tmp_path):
@@ -342,3 +355,15 @@ def test_prepare_current_message_reply_stages_without_tapping_send(tmp_path):
     assert backend.typed == ["reply body"]
     assert (352, 782) not in backend.taps
     assert result["data"]["thread_context"]["count"] == 2
+
+
+def test_read_recent_messages_scopes_to_detail_pane_in_split_view(tmp_path):
+    service = IphoneService(backend=SplitThreadBackend(), action_log_root=tmp_path / "logs", trace_root=tmp_path / "traces")
+
+    result = service.read_recent_messages(limit=5, udid="UDID")
+
+    assert result["ok"] is True
+    texts = [m["text"] for m in result["data"]["messages"]]
+    assert texts == ["Actual right-pane message"]
+    assert "sidebar preview" not in texts
+    assert result["data"]["messages"][0]["direction"] == "outbound"

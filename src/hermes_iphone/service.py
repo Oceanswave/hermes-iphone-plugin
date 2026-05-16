@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -424,26 +425,52 @@ class IphoneService:
         tree = tree_result["data"]["tree"]
         if tree.get("bundle_id") != "com.apple.MobileSMS":
             return {"ok": False, "error": "messages_not_foreground", "message": "Messages is not the foreground app.", "data": {"bundle_id": tree.get("bundle_id"), "name": tree.get("name")}}
-        ignored = {"messages", "compose", "edit", "search", "send", "message", "imessage", "to:", "to", "back", "cancel"}
+        ignored = {"messages", "compose", "edit", "search", "send", "message", "imessage", "to:", "to", "back", "cancel", "add", "dictate"}
+        elements = tree.get("elements", [])
+        app_width = 390
+        for element in elements:
+            if element.get("type") == "application":
+                try:
+                    app_width = int((element.get("bounds") or {}).get("width") or app_width)
+                except Exception:
+                    pass
+                break
+        pane_left = 0
+        if app_width >= 700:
+            for element in elements:
+                if element.get("name") == "messageBodyField":
+                    try:
+                        pane_left = max(0, int((element.get("bounds") or {}).get("x", 0)) - 80)
+                    except Exception:
+                        pane_left = 0
+                    break
+        screen_mid = pane_left + max(1, app_width - pane_left) / 2
         messages: list[dict[str, Any]] = []
-        for element in tree.get("elements", []):
-            label = str(element.get("label") or element.get("value") or element.get("name") or "").strip()
-            if not label or label.casefold() in ignored:
-                continue
-            if element.get("type") not in {"statictext", "cell", "textview", "textfield"}:
+        for element in elements:
+            element_type = str(element.get("type") or "")
+            if element_type not in {"statictext", "cell", "textview", "textfield"}:
                 continue
             bounds = element.get("bounds") or {}
             try:
-                if int(bounds.get("y", 0)) < 120:
+                y = int(bounds.get("y", 0))
+                center_x = int((element.get("center") or {}).get("x", 0))
+                if pane_left and center_x < pane_left:
+                    continue
+                if y < 120 and element_type != "textview":
                     continue
             except Exception:
-                pass
+                center_x = 0
+            label = str((element.get("value") if element_type == "textview" and element.get("value") else None) or element.get("label") or element.get("value") or element.get("name") or "").strip()
+            normalized = label.casefold().strip("\u200e ")
+            if not label or normalized in ignored:
+                continue
+            if normalized.startswith("read ") or re.fullmatch(r"\d{1,2}:\d{2}\s*(am|pm)?", normalized):
+                continue
+            if label in {"CKBalloonTextView"}:
+                continue
             direction = "unknown"
             try:
-                center_x = int((element.get("center") or {}).get("x", 0))
-                width = int(bounds.get("width", 0))
-                if center_x and width:
-                    screen_mid = 390 / 2
+                if center_x:
                     direction = "outbound" if center_x > screen_mid else "inbound"
             except Exception:
                 direction = "unknown"
