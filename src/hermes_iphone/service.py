@@ -279,14 +279,21 @@ class IphoneService:
             approval_fn=approval_fn,
         )
         if approval not in {"once", "session", "always"}:
+            error = "approval_denied" if approval == "deny" else "approval_required"
+            message = (
+                "Hermes approval is not available in this interface. The draft is staged but unsent; "
+                "use the fallback token with iphone_confirm_prepared_action only after explicit approval, "
+                "or rerun from a gateway session / yolo-approved context."
+            ) if approval == "unavailable" else "Hermes approval denied the staged send; the draft remains unsent."
             return {
                 "ok": False,
-                "error": "approval_denied" if approval == "deny" else "approval_unavailable",
+                "error": error,
                 "approval": approval,
+                "message": message,
                 "staged": True,
                 "token": prepared.get("token"),
                 "data": prepared.get("data"),
-                "next_step": "Use /approve to allow the pending Hermes approval, or call iphone_confirm_prepared_action with the token after explicit approval.",
+                "next_step": "Use the fallback token with iphone_confirm_prepared_action only after explicit approval.",
             }
 
         sent = self.confirm_prepared_action(prepared["token"], udid=udid)

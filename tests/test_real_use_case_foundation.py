@@ -162,3 +162,16 @@ def test_send_text_denied_by_hermes_approval_leaves_staged_draft(tmp_path):
     assert result["token"]
     assert backend.typed == ["Sean", "hello"]
     assert (352, 782) not in backend.taps
+
+
+def test_send_text_cli_unavailable_approval_has_actionable_non_gateway_message(tmp_path):
+    backend = FakeBackend()
+    service = IphoneService(backend=backend, action_log_root=tmp_path / "logs", trace_root=tmp_path / "traces")
+
+    result = service.send_text(to="Sean", body="hello", udid="UDID", approval_fn=lambda *a, **k: "unavailable")
+
+    assert result["ok"] is False
+    assert result["error"] == "approval_required"
+    assert result["approval"] == "unavailable"
+    assert "fallback token" in result["message"]
+    assert "/approve" not in result["message"]
