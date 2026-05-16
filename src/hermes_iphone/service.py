@@ -4,7 +4,7 @@ import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .backends import IphoneBackend, make_backend
 from .safety import SafetyPolicy
@@ -260,6 +260,58 @@ class IphoneService:
             "data": {"to": to, "body_length": len(body), "screenshot_before_send": screenshot_path, "send_element": element, "udid": udid},
             "next_step": "Ask the user to approve sending this already-composed message, then call iphone_confirm_prepared_action with the token.",
         }
+
+    def send_text(
+        self,
+        to: str,
+        body: str,
+        udid: str | None = None,
+        approval_fn: Callable[..., str] | None = None,
+    ) -> dict[str, Any]:
+        prepared = self.prepare_text(to=to, body=body, udid=udid)
+        if not prepared.get("ok"):
+            return prepared
+
+        command = f"Send iMessage/SMS to {to} ({len(body)} characters)"
+        approval = self._request_send_approval(
+            command=command,
+            description="send_text",
+            approval_fn=approval_fn,
+        )
+        if approval not in {"once", "session", "always"}:
+            return {
+                "ok": False,
+                "error": "approval_denied" if approval == "deny" else "approval_unavailable",
+                "approval": approval,
+                "staged": True,
+                "token": prepared.get("token"),
+                "data": prepared.get("data"),
+                "next_step": "Use /approve to allow the pending Hermes approval, or call iphone_confirm_prepared_action with the token after explicit approval.",
+            }
+
+        sent = self.confirm_prepared_action(prepared["token"], udid=udid)
+        if sent.get("ok"):
+            sent["approval"] = approval
+        return sent
+
+    def _request_send_approval(
+        self,
+        *,
+        command: str,
+        description: str,
+        approval_fn: Callable[..., str] | None = None,
+    ) -> str:
+        fn = approval_fn
+        if fn is None:
+            try:
+                from tools.approval import prompt_dangerous_approval  # type: ignore
+                fn = prompt_dangerous_approval
+            except Exception:
+                return "unavailable"
+        try:
+            return str(fn(command, description, allow_permanent=True)).strip().lower()
+        except Exception:
+            return "deny"
 
     def confirm_prepared_action(self, token: str, udid: str | None = None) -> dict[str, Any]:
         confirmed = self.policy.confirm(token)

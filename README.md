@@ -24,6 +24,7 @@ Native Hermes plugin for attached iPhone automation. The plugin exposes a static
 - `iphone_type_text` — type into the focused field through WDA
 - `iphone_press_button` — press `home`, `lock`, `volume_up`, or `volume_down` through WDA
 - `iphone_prepare_text` — prepare a guarded text-message action
+- `iphone_send_text` — stage a Messages draft, request Hermes built-in approval, then tap Send if approved
 - `iphone_confirm_prepared_action` — consume a one-time confirmation token
 
 ## Backend behavior
@@ -103,7 +104,9 @@ Trace folders live under `~/iphone-traces` and include metadata plus compact UI 
 
 It never taps Send. It also does not persist the message body in action logs or traces; logs keep body length and recipient metadata only.
 
-Only `iphone_confirm_prepared_action(token=...)`, after explicit user approval, consumes the token and taps Send. Tokens are one-time use and expire.
+`iphone_send_text` is the high-level real-send flow. It stages the same draft, then calls Hermes' built-in approval system before tapping Send. Gateway users can respond with `/approve`, `/approve session`, `/approve always`, `/deny`, or use `/yolo`/approval config to opt out according to normal Hermes policy. CLI users get the normal dangerous-action prompt. If Hermes approval is unavailable or denied, the draft remains staged and the one-time token is returned for explicit fallback confirmation.
+
+`iphone_confirm_prepared_action(token=...)` remains the low-level fallback: after explicit user approval, it consumes a one-time token and taps Send. Tokens are one-time use and expire.
 
 Real-world readiness notes:
 
@@ -126,13 +129,19 @@ Environment variables:
 
 ## Safety
 
-Potential external or destructive actions are prepared first and require explicit confirmation before execution. Text sending uses:
+Potential external or destructive actions are prepared first and require explicit confirmation before execution. High-level text sending uses Hermes-native approval:
+
+1. `iphone_send_text`
+2. built-in Hermes approval (`/approve`, `/approve session`, `/approve always`, `/deny`, or `/yolo`/config policy)
+3. Send tap only after approval
+
+Lower-level/manual flows can still use:
 
 1. `iphone_prepare_text`
-2. user approval of exact recipient/body
+2. explicit user approval of exact recipient/body
 3. `iphone_confirm_prepared_action`
 
-Prepared confirmation tokens are one-time and expire. Message bodies should not be retained in logs or memory after execution. Real SMS/iMessage sending is intentionally not implemented until the transport and final confirmation UX are explicitly chosen.
+Prepared confirmation tokens are one-time and expire. Message bodies should not be retained in logs or memory after execution.
 
 ## Development
 

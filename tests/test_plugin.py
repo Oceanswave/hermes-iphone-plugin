@@ -22,8 +22,9 @@ def test_register_registers_tools_and_skill():
     assert "iphone_current_app" in names
     assert "iphone_swipe" in names
     assert "iphone_screenshot" in names
+    assert "iphone_send_text" in names
     assert "iphone_confirm_prepared_action" in names
-    assert len(names) == 25
+    assert len(names) == 26
     assert calls["skills"]
 
 

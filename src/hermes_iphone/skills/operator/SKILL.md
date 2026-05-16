@@ -11,8 +11,8 @@ Rules:
 - Start with `iphone_status` and `iphone_list_devices`.
 - For WDA-backed controls, call `iphone_ensure_wda` first when reliability matters; tap/type/button/swipe also self-heal by calling the helper and retrying once.
 - Prefer deterministic semantic tools (`iphone_tree`, `iphone_find_element`, `iphone_tap_text`, `iphone_wait_for_text`, `iphone_type_into_field`, `iphone_current_app`) over vision-only automation or raw coordinate tapping.
-- Never send texts, place calls, delete data, buy anything, or change account/security settings without explicit user approval.
-- For SMS/iMessage, use `iphone_prepare_text` first. Only call `iphone_confirm_prepared_action` after the user approves the exact recipient/body.
+- Never send texts, place calls, delete data, buy anything, or change account/security settings without explicit user approval or Hermes built-in approval.
+- For SMS/iMessage real sends, prefer `iphone_send_text`; it stages the draft and then uses Hermes' approval system (`/approve`, `/approve session`, `/approve always`, `/deny`, `/yolo`) before tapping Send. Use `iphone_prepare_text` for draft-only/manual fallback flows.
 - Report which backend is active and whether any capability is not yet implemented on this host.
 
 Current tools:
@@ -36,6 +36,7 @@ Current tools:
 - `iphone_type_text`
 - `iphone_press_button`
 - `iphone_prepare_text`
+- `iphone_send_text`
 - `iphone_confirm_prepared_action`
 
 Linux usbmuxd troubleshooting:
@@ -61,10 +62,11 @@ Semantic automation notes:
 
 Safe Messages flow:
 - `iphone_prepare_text` now opens/focuses Messages, taps Compose, types recipient/body, captures a screenshot before send, locates Send, and returns a token.
+- `iphone_send_text` is the high-level flow: it calls `iphone_prepare_text`, asks Hermes' built-in dangerous-action approval, then consumes the token and taps Send only if approval returns `once`, `session`, or `always`.
 - The iPhone must be unlocked and awake before this flow; iOS denies launching Messages while locked.
 - App launches are WDA-first. A locked phone returns `device_locked` quickly/actionably and should not fall back through slower DVT launch attempts.
 - `iphone_prepare_text` must never tap Send.
-- Do not call `iphone_confirm_prepared_action` until the user explicitly approves the exact recipient/body in chat.
+- Do not call `iphone_confirm_prepared_action` manually until the user explicitly approves the exact recipient/body in chat. Prefer Hermes-native approval through `iphone_send_text` for normal sends.
 - `iphone_confirm_prepared_action` consumes the one-time token and taps Send for `send_text` actions.
 - Message body text must not be persisted to logs/traces; only body length and metadata are retained.
 

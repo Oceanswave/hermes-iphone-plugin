@@ -43,6 +43,7 @@ def test_register_exposes_native_iphone_tools_and_operator_skill():
         "iphone_type_text",
         "iphone_press_button",
         "iphone_prepare_text",
+        "iphone_send_text",
         "iphone_confirm_prepared_action",
     }.issubset(ctx.tools)
     assert all(tool["toolset"] == "iphone" for tool in ctx.tools.values())

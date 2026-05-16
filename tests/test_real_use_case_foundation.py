@@ -130,3 +130,35 @@ def test_prepare_text_accepts_message_body_field_label(tmp_path):
     assert result["ok"] is True
     assert result["requires_confirmation"] is True
     assert backend.typed[-1] == "hello"
+
+
+def test_send_text_uses_hermes_approval_before_tapping_send(tmp_path):
+    backend = FakeBackend()
+    approvals = []
+    service = IphoneService(backend=backend, action_log_root=tmp_path / "logs", trace_root=tmp_path / "traces")
+
+    def approve(command, description, *, allow_permanent=True):
+        approvals.append((command, description, allow_permanent))
+        return "always"
+
+    result = service.send_text(to="Sean", body="hello", udid="UDID", approval_fn=approve)
+
+    assert result["ok"] is True
+    assert result["data"]["sent"] is True
+    assert result["approval"] == "always"
+    assert approvals == [("Send iMessage/SMS to Sean (5 characters)", "send_text", True)]
+    assert backend.taps[-1] == (352, 782)
+
+
+def test_send_text_denied_by_hermes_approval_leaves_staged_draft(tmp_path):
+    backend = FakeBackend()
+    service = IphoneService(backend=backend, action_log_root=tmp_path / "logs", trace_root=tmp_path / "traces")
+
+    result = service.send_text(to="Sean", body="hello", udid="UDID", approval_fn=lambda *a, **k: "deny")
+
+    assert result["ok"] is False
+    assert result["error"] == "approval_denied"
+    assert result["staged"] is True
+    assert result["token"]
+    assert backend.typed == ["Sean", "hello"]
+    assert (352, 782) not in backend.taps
