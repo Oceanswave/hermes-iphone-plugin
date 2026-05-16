@@ -71,9 +71,68 @@ def test_screenshot_supports_async_lockdown_factory(tmp_path, monkeypatch):
     assert Path(result.data["path"]).read_bytes() == b"PNGDATA"
 
 
-def test_launch_app_uses_dvt_process_control(monkeypatch):
+def test_launch_app_uses_wda_session_first(monkeypatch):
     install_lockdown(monkeypatch)
     calls = []
+
+    class FakeWdaClient:
+        def __init__(self, service_provider, timeout=10.0):
+            calls.append(("wda", service_provider, timeout))
+
+        async def start_session(self, bundle_id=None):
+            calls.append(("wda-launch", bundle_id))
+            return "SESSION1"
+
+    fake_wda = types.ModuleType("pymobiledevice3.services.wda")
+    setattr(fake_wda, "WdaServiceClient", FakeWdaClient)
+    monkeypatch.setitem(sys.modules, "pymobiledevice3.services.wda", fake_wda)
+
+    result = PyMobileDeviceBackend().launch_app("com.apple.MobileSMS", "UDID123")
+
+    assert result.ok is True
+    assert result.data == {"bundle_id": "com.apple.MobileSMS", "session_id": "SESSION1", "udid": "UDID123", "transport": "wda"}
+    assert ("wda-launch", "com.apple.MobileSMS") in calls
+
+
+def test_launch_app_reports_locked_device_without_slow_fallback(monkeypatch):
+    install_lockdown(monkeypatch)
+    calls = []
+
+    class FakeWdaClient:
+        def __init__(self, service_provider, timeout=10.0):
+            pass
+
+        async def start_session(self, bundle_id=None):
+            calls.append(("wda-launch", bundle_id))
+            raise RuntimeError('Unable to launch com.apple.MobileSMS because the device was not, or could not be, unlocked.')
+
+    fake_wda = types.ModuleType("pymobiledevice3.services.wda")
+    setattr(fake_wda, "WdaServiceClient", FakeWdaClient)
+    monkeypatch.setitem(sys.modules, "pymobiledevice3.services.wda", fake_wda)
+
+    result = PyMobileDeviceBackend().launch_app("com.apple.MobileSMS", "UDID123")
+
+    assert result.ok is False
+    assert result.error == "device_locked"
+    assert "unlock" in result.message.lower()
+    assert calls == [("wda-launch", "com.apple.MobileSMS")]
+
+
+def test_launch_app_falls_back_to_dvt_for_non_locked_wda_failure(monkeypatch):
+    install_lockdown(monkeypatch)
+    calls = []
+
+    class FakeWdaClient:
+        def __init__(self, service_provider, timeout=10.0):
+            calls.append(("wda", service_provider, timeout))
+
+        async def start_session(self, bundle_id=None):
+            calls.append(("wda-launch", bundle_id))
+            raise RuntimeError("wda temporary failure")
+
+    fake_wda = types.ModuleType("pymobiledevice3.services.wda")
+    setattr(fake_wda, "WdaServiceClient", FakeWdaClient)
+    monkeypatch.setitem(sys.modules, "pymobiledevice3.services.wda", fake_wda)
 
     class FakeDvtProvider:
         def __init__(self, service_provider):
@@ -109,8 +168,20 @@ def test_launch_app_uses_dvt_process_control(monkeypatch):
     result = PyMobileDeviceBackend().launch_app("com.apple.mobilesafari", "UDID123")
 
     assert result.ok is True
-    assert result.data == {"bundle_id": "com.apple.mobilesafari", "pid": 4242, "udid": "UDID123"}
+    assert result.data == {"bundle_id": "com.apple.mobilesafari", "pid": 4242, "udid": "UDID123", "transport": "dvt", "wda_error": "wda temporary failure"}
     assert ("launch", "com.apple.mobilesafari") in calls
+
+
+def test_run_async_is_safe_inside_existing_event_loop():
+    backend = PyMobileDeviceBackend()
+
+    async def inner():
+        async def work():
+            return "ok"
+        return backend._run_async(work())
+
+    import asyncio
+    assert asyncio.run(inner()) == "ok"
 
 
 def test_open_url_uses_webinspector_launch_task(monkeypatch):

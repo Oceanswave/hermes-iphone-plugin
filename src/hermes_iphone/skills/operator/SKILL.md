@@ -61,6 +61,8 @@ Semantic automation notes:
 
 Safe Messages flow:
 - `iphone_prepare_text` now opens/focuses Messages, taps Compose, types recipient/body, captures a screenshot before send, locates Send, and returns a token.
+- The iPhone must be unlocked and awake before this flow; iOS denies launching Messages while locked.
+- App launches are WDA-first. A locked phone returns `device_locked` quickly/actionably and should not fall back through slower DVT launch attempts.
 - `iphone_prepare_text` must never tap Send.
 - Do not call `iphone_confirm_prepared_action` until the user explicitly approves the exact recipient/body in chat.
 - `iphone_confirm_prepared_action` consumes the one-time token and taps Send for `send_text` actions.

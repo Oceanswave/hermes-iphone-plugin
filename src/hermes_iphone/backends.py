@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import importlib.util
 import inspect
 import os
@@ -201,7 +202,12 @@ class PyMobileDeviceBackend:
 
     def _run_async(self, value: Any) -> Any:
         if inspect.isawaitable(value):
-            return asyncio.run(value)
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return asyncio.run(value)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(asyncio.run, value).result()
         return value
 
     def _service_provider(self, udid: str | None = None) -> Any:
@@ -240,8 +246,29 @@ class PyMobileDeviceBackend:
             return await provider
         return provider
 
+    @staticmethod
+    def _looks_like_locked_device_error(message: str) -> bool:
+        lowered = message.lower()
+        return (
+            "device was not, or could not be, unlocked" in lowered
+            or "reason: locked" in lowered
+            or "bserrorcodedescription=locked" in lowered
+            or "could not be unlocked" in lowered
+        )
+
     def _error(self, capability: str, exc: Exception) -> BackendResult:
         message = str(exc) or repr(exc) or exc.__class__.__name__
+        if self._looks_like_locked_device_error(message):
+            return BackendResult(
+                ok=False,
+                error="device_locked",
+                message=(
+                    f"{capability} cannot continue because the iPhone is locked. "
+                    "Unlock the iPhone physically, keep it awake, then retry. "
+                    f"pymobiledevice3 reported: {message}"
+                ),
+                meta={"backend": self.name, "exception": exc.__class__.__name__, "retriable_after_unlock": True},
+            )
         if exc.__class__.__name__ == "WdaError":
             message = (
                 f"{capability} requires a reachable WebDriverAgent (WDA) service on the iPhone. "
@@ -473,7 +500,13 @@ class PyMobileDeviceBackend:
             return self._error("open_url", exc)
 
     def launch_app(self, bundle_id: str, udid: str | None = None) -> BackendResult:
-        async def run() -> int:
+        async def run_wda() -> str:
+            from pymobiledevice3.services.wda import WdaServiceClient  # type: ignore
+
+            client = WdaServiceClient(await self._service_provider_async(self._default_udid(udid)), timeout=10.0)
+            return await client.start_session(bundle_id)
+
+        async def run_dvt() -> int:
             from pymobiledevice3.services.dvt.instruments.dvt_provider import DvtProvider  # type: ignore
             from pymobiledevice3.services.dvt.instruments.process_control import ProcessControl  # type: ignore
 
@@ -482,10 +515,22 @@ class PyMobileDeviceBackend:
                     return await process_control.launch(bundle_id)
 
         try:
-            pid = self._run_async(run())
-            return BackendResult(ok=True, data={"bundle_id": bundle_id, "pid": pid, "udid": udid}, meta={"backend": self.name})
-        except Exception as exc:
-            return self._error("launch_app", exc)
+            session_id = self._run_async(run_wda())
+            return BackendResult(ok=True, data={"bundle_id": bundle_id, "session_id": session_id, "udid": udid, "transport": "wda"}, meta={"backend": self.name})
+        except Exception as wda_exc:
+            wda_message = str(wda_exc) or repr(wda_exc) or wda_exc.__class__.__name__
+            if self._looks_like_locked_device_error(wda_message):
+                return self._error("launch_app", wda_exc)
+            try:
+                pid = self._run_async(run_dvt())
+                return BackendResult(ok=True, data={"bundle_id": bundle_id, "pid": pid, "udid": udid, "transport": "dvt", "wda_error": wda_message}, meta={"backend": self.name})
+            except Exception as dvt_exc:
+                dvt_message = str(dvt_exc) or repr(dvt_exc) or dvt_exc.__class__.__name__
+                if self._looks_like_locked_device_error(dvt_message):
+                    return self._error("launch_app", dvt_exc)
+                result = self._error("launch_app", dvt_exc)
+                result.meta["wda_error"] = wda_message
+                return result
 
     def tap(self, x: int, y: int, udid: str | None = None) -> BackendResult:
         async def run() -> None:

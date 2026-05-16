@@ -105,6 +105,13 @@ It never taps Send. It also does not persist the message body in action logs or 
 
 Only `iphone_confirm_prepared_action(token=...)`, after explicit user approval, consumes the token and taps Send. Tokens are one-time use and expire.
 
+Real-world readiness notes:
+
+- The iPhone must be unlocked and awake before app-specific automation. iOS refuses to launch apps like Messages while locked.
+- App launch uses WDA sessions first, which gives fast actionable `device_locked` errors instead of slow/generic DVT launch failures.
+- If WDA reports the phone is locked, the plugin does not fall back through slower launch paths; unlock the phone and retry.
+- For seconds-level flows, call `iphone_ensure_wda` once, unlock/keep awake, then run the semantic action.
+
 ## Configuration
 
 Environment variables:
