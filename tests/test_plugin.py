@@ -1,12 +1,15 @@
-import json
-
-
 def test_register_registers_tools_and_skill():
     import hermes_iphone
+
     calls = {"tools": [], "skills": []}
+
     class Ctx:
-        def register_tool(self, **kw): calls["tools"].append(kw)
-        def register_skill(self, name, path, **kw): calls["skills"].append((name, path))
+        def register_tool(self, **kw):
+            calls["tools"].append(kw)
+
+        def register_skill(self, name, path, **kw):
+            calls["skills"].append((name, path))
+
     hermes_iphone.register(Ctx())
     names = [t["name"] for t in calls["tools"]]
     assert "iphone_status" in names
@@ -40,8 +43,9 @@ def test_register_registers_tools_and_skill():
 def test_prepare_confirm_token_is_one_time(tmp_path, monkeypatch):
     from hermes_iphone.safety import SafetyPolicy
     from hermes_iphone.state import PluginState
+
     policy = SafetyPolicy(state=PluginState(root=tmp_path))
-    prepared = policy.prepare("send_text", {"to":"+15551234567","body":"hello"})
+    prepared = policy.prepare("send_text", {"to": "+15551234567", "body": "hello"})
     assert prepared["ok"] is True
     token = prepared["token"]
     first = policy.confirm(token=token)
@@ -53,6 +57,7 @@ def test_prepare_confirm_token_is_one_time(tmp_path, monkeypatch):
 
 def test_list_devices_missing_dependency_monkeypatch(monkeypatch):
     from hermes_iphone.backends import NullBackend
+
     result = NullBackend("missing").list_devices().to_dict()
     assert result["ok"] is False
     assert result["error"] == "backend_unavailable"

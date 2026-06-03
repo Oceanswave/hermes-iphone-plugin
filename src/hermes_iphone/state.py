@@ -11,9 +11,14 @@ from typing import Any
 def default_state_root() -> Path:
     try:
         from hermes_constants import get_hermes_home  # type: ignore
+
         return Path(get_hermes_home()) / "plugins" / "iphone"
     except Exception:
-        return Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes")) / "plugins" / "iphone"
+        return (
+            Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
+            / "plugins"
+            / "iphone"
+        )
 
 
 class PluginState:
@@ -33,7 +38,9 @@ class PluginState:
 
     def _write_pending(self, data: dict[str, Any]) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(prefix="pending-actions-", suffix=".json", dir=str(self.root))
+        fd, tmp = tempfile.mkstemp(
+            prefix="pending-actions-", suffix=".json", dir=str(self.root)
+        )
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, sort_keys=True)
         os.replace(tmp, self.pending_path)
@@ -52,7 +59,11 @@ class PluginState:
     def cleanup_expired(self, now: float | None = None) -> int:
         now = time.time() if now is None else now
         data = self._read_pending()
-        kept = {k: v for k, v in data.items() if isinstance(v, dict) and float(v.get("expires_at", 0)) > now}
+        kept = {
+            k: v
+            for k, v in data.items()
+            if isinstance(v, dict) and float(v.get("expires_at", 0)) > now
+        }
         removed = len(data) - len(kept)
         if removed:
             self._write_pending(kept)

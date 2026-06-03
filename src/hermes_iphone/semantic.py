@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import time
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
 from typing import Any
 
 
@@ -49,7 +47,9 @@ def _label(attrs: dict[str, str]) -> str:
     return ""
 
 
-def compact_tree_from_xml(xml: str, *, visible_only: bool = True, limit: int = 250) -> dict[str, Any]:
+def compact_tree_from_xml(
+    xml: str, *, visible_only: bool = True, limit: int = 250
+) -> dict[str, Any]:
     root = ET.fromstring(xml)
     elements: list[dict[str, Any]] = []
     bundle_id = root.attrib.get("bundleId")
@@ -70,21 +70,23 @@ def compact_tree_from_xml(xml: str, *, visible_only: bool = True, limit: int = 2
         if visible_only and not visible:
             include = False
         if include:
-            elements.append({
-                "id": f"e{len(elements)}",
-                "type": _short_type(raw_type),
-                "raw_type": raw_type,
-                "label": label,
-                "name": attrs.get("name"),
-                "value": attrs.get("value"),
-                "enabled": _bool(attrs.get("enabled"), True),
-                "visible": visible,
-                "accessible": _bool(attrs.get("accessible"), False),
-                "bounds": {"x": x, "y": y, "width": width, "height": height},
-                "center": {"x": x + width // 2, "y": y + height // 2},
-                "traits": attrs.get("traits", ""),
-                "path": path,
-            })
+            elements.append(
+                {
+                    "id": f"e{len(elements)}",
+                    "type": _short_type(raw_type),
+                    "raw_type": raw_type,
+                    "label": label,
+                    "name": attrs.get("name"),
+                    "value": attrs.get("value"),
+                    "enabled": _bool(attrs.get("enabled"), True),
+                    "visible": visible,
+                    "accessible": _bool(attrs.get("accessible"), False),
+                    "bounds": {"x": x, "y": y, "width": width, "height": height},
+                    "center": {"x": x + width // 2, "y": y + height // 2},
+                    "traits": attrs.get("traits", ""),
+                    "path": path,
+                }
+            )
         for idx, child in enumerate(list(node)):
             walk(child, f"{path}/{idx}")
 
@@ -117,9 +119,19 @@ def _match_score(element: dict[str, Any], query: str) -> int:
     return score
 
 
-def find_elements(tree: dict[str, Any], *, text: str | None = None, element_type: str | None = None, enabled: bool | None = None, visible: bool | None = True, limit: int = 10) -> list[dict[str, Any]]:
+def find_elements(
+    tree: dict[str, Any],
+    *,
+    text: str | None = None,
+    element_type: str | None = None,
+    enabled: bool | None = None,
+    visible: bool | None = True,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
     query = (text or "").casefold()
-    wanted_type = element_type.replace("XCUIElementType", "").casefold() if element_type else None
+    wanted_type = (
+        element_type.replace("XCUIElementType", "").casefold() if element_type else None
+    )
     scored_matches: list[tuple[int, int, dict[str, Any]]] = []
     for idx, element in enumerate(tree.get("elements", [])):
         if visible is not None and bool(element.get("visible")) is not visible:
@@ -128,7 +140,9 @@ def find_elements(tree: dict[str, Any], *, text: str | None = None, element_type
             continue
         if wanted_type and wanted_type not in str(element.get("type", "")).casefold():
             continue
-        haystack = " ".join(str(element.get(k) or "") for k in ("label", "name", "value")).casefold()
+        haystack = " ".join(
+            str(element.get(k) or "") for k in ("label", "name", "value")
+        ).casefold()
         if query and query not in haystack:
             continue
         scored_matches.append((_match_score(element, query), idx, element))

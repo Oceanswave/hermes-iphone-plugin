@@ -51,8 +51,16 @@ def test_diagnostics_reports_wda_helper_and_readiness(monkeypatch, tmp_path):
     helper.chmod(0o755)
     monkeypatch.setenv("HERMES_IPHONE_WDA_HELPER", str(helper))
     monkeypatch.setenv("HERMES_IPHONE_UDID", "UDID123")
-    monkeypatch.setattr(PyMobileDeviceBackend, "_tunneld_ready", lambda self, udid=None: (True, ["UDID123"], None))
-    monkeypatch.setattr(PyMobileDeviceBackend, "_wda_ready", lambda self, udid=None: (True, {"ready": True}, None))
+    monkeypatch.setattr(
+        PyMobileDeviceBackend,
+        "_tunneld_ready",
+        lambda self, udid=None: (True, ["UDID123"], None),
+    )
+    monkeypatch.setattr(
+        PyMobileDeviceBackend,
+        "_wda_ready",
+        lambda self, udid=None: (True, {"ready": True}, None),
+    )
 
     result = PyMobileDeviceBackend().diagnostics()
 

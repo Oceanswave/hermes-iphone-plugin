@@ -58,7 +58,9 @@ _TEXT_VALUE_KEYS = {"text", "value", "message", "body", "recipient", "to"}
 class QuickActionBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    action: str = Field(..., description="Quick action key, e.g. ensure-wda, home, launch-messages.")
+    action: str = Field(
+        ..., description="Quick action key, e.g. ensure-wda, home, launch-messages."
+    )
     udid: str | None = None
     confirm: bool = False
     bundle_id: str | None = None
@@ -73,7 +75,9 @@ def _call(method_name: str, args: dict[str, Any] | None = None) -> dict[str, Any
     service = _service()
     method = getattr(service, method_name, None)
     if method is None:
-        raise HTTPException(status_code=404, detail=f"Unknown iPhone service method: {method_name}")
+        raise HTTPException(
+            status_code=404, detail=f"Unknown iPhone service method: {method_name}"
+        )
     args = args or {}
     try:
         result = method(**args)
@@ -82,11 +86,18 @@ def _call(method_name: str, args: dict[str, Any] | None = None) -> dict[str, Any
     except Exception as exc:
         return {"ok": False, "error": exc.__class__.__name__, "message": str(exc)}
     if not isinstance(result, dict):
-        return {"ok": False, "error": "unexpected_result", "message": "iPhone service returned a non-object payload", "data": result}
+        return {
+            "ok": False,
+            "error": "unexpected_result",
+            "message": "iPhone service returned a non-object payload",
+            "data": result,
+        }
     return result
 
 
-def _safe_call(method_name: str, args: dict[str, Any] | None = None, timeout_seconds: float = 3.0) -> dict[str, Any]:
+def _safe_call(
+    method_name: str, args: dict[str, Any] | None = None, timeout_seconds: float = 3.0
+) -> dict[str, Any]:
     try:
         executor = ThreadPoolExecutor(max_workers=1)
         future = executor.submit(_call, method_name, args)
@@ -113,9 +124,15 @@ def _display_payload(value: Any) -> Any:
             lowered = key_text.lower()
             if any(part in lowered for part in _SECRET_KEY_PARTS):
                 safe[key_text] = "[REDACTED]"
-            elif lowered in _TEXT_VALUE_KEYS and isinstance(item, str) and len(item) > 16:
+            elif (
+                lowered in _TEXT_VALUE_KEYS and isinstance(item, str) and len(item) > 16
+            ):
                 safe[key_text] = f"[REDACTED_TEXT:{len(item)}]"
-            elif lowered in {"source", "xml"} and isinstance(item, str) and len(item) > 500:
+            elif (
+                lowered in {"source", "xml"}
+                and isinstance(item, str)
+                and len(item) > 500
+            ):
                 safe[key_text] = f"[REDACTED_XML:{len(item)}]"
             else:
                 safe[key_text] = _display_payload(item)
@@ -155,7 +172,10 @@ def tools() -> dict[str, Any]:
 @router.get("/overview")
 def overview(
     udid: str | None = None,
-    include_tree: bool = Query(False, description="Include compact semantic tree. Defaults false to keep refreshes lightweight."),
+    include_tree: bool = Query(
+        False,
+        description="Include compact semantic tree. Defaults false to keep refreshes lightweight.",
+    ),
 ) -> dict[str, Any]:
     args = _common_args(udid)
     sections: dict[str, Any] = {
@@ -163,7 +183,9 @@ def overview(
         "devices": _safe_call("list_devices"),
         "screen": _safe_call("screen_info", args),
         "current_app": _safe_call("current_app", args),
-        "snapshot": _safe_call("snapshot_state", {**args, "include_screenshot": False, "limit": 20}),
+        "snapshot": _safe_call(
+            "snapshot_state", {**args, "include_screenshot": False, "limit": 20}
+        ),
         "last_trace": _safe_call("last_trace"),
         "action_logs": _safe_call("action_logs", {"limit": 5}),
     }
@@ -173,7 +195,12 @@ def overview(
 
 
 @router.get("/read/{read_key}")
-def read(read_key: str, udid: str | None = None, limit: int = 20, include_screenshot: bool = False) -> dict[str, Any]:
+def read(
+    read_key: str,
+    udid: str | None = None,
+    limit: int = 20,
+    include_screenshot: bool = False,
+) -> dict[str, Any]:
     method_name = _READS.get(read_key)
     if not method_name:
         raise HTTPException(status_code=404, detail=f"Unknown read key: {read_key}")
@@ -191,7 +218,9 @@ def read(read_key: str, udid: str | None = None, limit: int = 20, include_screen
 def quick_action(body: QuickActionBody) -> dict[str, Any]:
     method_name = _ACTIONS.get(body.action)
     if not method_name:
-        raise HTTPException(status_code=404, detail=f"Unknown quick action: {body.action}")
+        raise HTTPException(
+            status_code=404, detail=f"Unknown quick action: {body.action}"
+        )
     if not body.confirm:
         return {
             "ok": False,
@@ -210,4 +239,6 @@ def quick_action(body: QuickActionBody) -> dict[str, Any]:
 
 # Keep a tiny self-check for import-time debugging from the dashboard loader.
 def debug_catalog_json() -> str:
-    return json.dumps({"reads": sorted(_READS), "actions": sorted(_ACTIONS)}, sort_keys=True)
+    return json.dumps(
+        {"reads": sorted(_READS), "actions": sorted(_ACTIONS)}, sort_keys=True
+    )

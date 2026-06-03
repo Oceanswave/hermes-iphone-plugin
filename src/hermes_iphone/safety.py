@@ -7,7 +7,13 @@ from typing import Any
 
 from .state import PluginState
 
-CONFIRMATION_REQUIRED_ACTIONS = {"send_text", "place_call", "delete", "purchase", "settings_change"}
+CONFIRMATION_REQUIRED_ACTIONS = {
+    "send_text",
+    "place_call",
+    "delete",
+    "purchase",
+    "settings_change",
+}
 
 
 def requires_confirmation(action: str) -> bool:

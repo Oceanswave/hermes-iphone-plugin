@@ -1,5 +1,3 @@
-import json
-
 from hermes_iphone.safety import SafetyPolicy, requires_confirmation
 from hermes_iphone.state import PluginState
 
@@ -15,7 +13,9 @@ def test_prepare_and_confirm_action_uses_one_time_tokens(tmp_path):
     state = PluginState(root=tmp_path)
     policy = SafetyPolicy(state=state)
 
-    prepared = policy.prepare(action="send_text", payload={"to": "+15555550123", "body": "hello"})
+    prepared = policy.prepare(
+        action="send_text", payload={"to": "+15555550123", "body": "hello"}
+    )
     assert prepared["requires_confirmation"] is True
     assert prepared["token"]
 

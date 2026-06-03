@@ -9,11 +9,13 @@ def install_lockdown(monkeypatch, provider="provider", async_factory=False):
     fake_lockdown = types.ModuleType("pymobiledevice3.lockdown")
 
     if async_factory:
+
         async def create_using_usbmux(serial=None, autopair=True):
             assert serial == "UDID123"
             assert autopair is True
             return provider
     else:
+
         def create_using_usbmux(serial=None, autopair=True):
             assert serial == "UDID123"
             assert autopair is True
@@ -25,7 +27,9 @@ def install_lockdown(monkeypatch, provider="provider", async_factory=False):
 
     setattr(fake_lockdown, "create_using_usbmux", create_using_usbmux)
     monkeypatch.setitem(sys.modules, "pymobiledevice3.lockdown", fake_lockdown)
-    monkeypatch.setattr(PyMobileDeviceBackend, "_service_provider_async", service_provider_async)
+    monkeypatch.setattr(
+        PyMobileDeviceBackend, "_service_provider_async", service_provider_async
+    )
 
 
 def install_fake_wda_screenshot(monkeypatch, image=b"PNGDATA"):
@@ -90,7 +94,12 @@ def test_launch_app_uses_wda_session_first(monkeypatch):
     result = PyMobileDeviceBackend().launch_app("com.apple.MobileSMS", "UDID123")
 
     assert result.ok is True
-    assert result.data == {"bundle_id": "com.apple.MobileSMS", "session_id": "SESSION1", "udid": "UDID123", "transport": "wda"}
+    assert result.data == {
+        "bundle_id": "com.apple.MobileSMS",
+        "session_id": "SESSION1",
+        "udid": "UDID123",
+        "transport": "wda",
+    }
     assert ("wda-launch", "com.apple.MobileSMS") in calls
 
 
@@ -104,7 +113,9 @@ def test_launch_app_reports_locked_device_without_slow_fallback(monkeypatch):
 
         async def start_session(self, bundle_id=None):
             calls.append(("wda-launch", bundle_id))
-            raise RuntimeError('Unable to launch com.apple.MobileSMS because the device was not, or could not be, unlocked.')
+            raise RuntimeError(
+                "Unable to launch com.apple.MobileSMS because the device was not, or could not be, unlocked."
+            )
 
     fake_wda = types.ModuleType("pymobiledevice3.services.wda")
     setattr(fake_wda, "WdaServiceClient", FakeWdaClient)
@@ -158,17 +169,33 @@ def test_launch_app_falls_back_to_dvt_for_non_locked_wda_failure(monkeypatch):
             calls.append(("launch", bundle_id))
             return 4242
 
-    fake_provider = types.ModuleType("pymobiledevice3.services.dvt.instruments.dvt_provider")
+    fake_provider = types.ModuleType(
+        "pymobiledevice3.services.dvt.instruments.dvt_provider"
+    )
     setattr(fake_provider, "DvtProvider", FakeDvtProvider)
-    fake_pc = types.ModuleType("pymobiledevice3.services.dvt.instruments.process_control")
+    fake_pc = types.ModuleType(
+        "pymobiledevice3.services.dvt.instruments.process_control"
+    )
     setattr(fake_pc, "ProcessControl", FakeProcessControl)
-    monkeypatch.setitem(sys.modules, "pymobiledevice3.services.dvt.instruments.dvt_provider", fake_provider)
-    monkeypatch.setitem(sys.modules, "pymobiledevice3.services.dvt.instruments.process_control", fake_pc)
+    monkeypatch.setitem(
+        sys.modules,
+        "pymobiledevice3.services.dvt.instruments.dvt_provider",
+        fake_provider,
+    )
+    monkeypatch.setitem(
+        sys.modules, "pymobiledevice3.services.dvt.instruments.process_control", fake_pc
+    )
 
     result = PyMobileDeviceBackend().launch_app("com.apple.mobilesafari", "UDID123")
 
     assert result.ok is True
-    assert result.data == {"bundle_id": "com.apple.mobilesafari", "pid": 4242, "udid": "UDID123", "transport": "dvt", "wda_error": "wda temporary failure"}
+    assert result.data == {
+        "bundle_id": "com.apple.mobilesafari",
+        "pid": 4242,
+        "udid": "UDID123",
+        "transport": "dvt",
+        "wda_error": "wda temporary failure",
+    }
     assert ("launch", "com.apple.mobilesafari") in calls
 
 
@@ -178,9 +205,11 @@ def test_run_async_is_safe_inside_existing_event_loop():
     async def inner():
         async def work():
             return "ok"
+
         return backend._run_async(work())
 
     import asyncio
+
     assert asyncio.run(inner()) == "ok"
 
 
@@ -193,7 +222,9 @@ def test_open_url_uses_webinspector_launch_task(monkeypatch):
 
     fake_webinspector = types.ModuleType("pymobiledevice3.cli.webinspector")
     setattr(fake_webinspector, "launch_task", launch_task)
-    monkeypatch.setitem(sys.modules, "pymobiledevice3.cli.webinspector", fake_webinspector)
+    monkeypatch.setitem(
+        sys.modules, "pymobiledevice3.cli.webinspector", fake_webinspector
+    )
 
     result = PyMobileDeviceBackend().open_url("https://example.com", "UDID123")
 
@@ -251,7 +282,9 @@ def test_tap_retries_after_wda_self_heal(monkeypatch):
     fake_wda = types.ModuleType("pymobiledevice3.services.wda")
     setattr(fake_wda, "WdaServiceClient", FakeWdaClient)
     monkeypatch.setitem(sys.modules, "pymobiledevice3.services.wda", fake_wda)
-    monkeypatch.setattr(PyMobileDeviceBackend, "_ensure_wda", lambda self, udid=None: True)
+    monkeypatch.setattr(
+        PyMobileDeviceBackend, "_ensure_wda", lambda self, udid=None: True
+    )
 
     result = PyMobileDeviceBackend().tap(12, 34, "UDID123")
 
@@ -332,7 +365,11 @@ def test_screen_info_uses_wda_status_size_and_orientation(monkeypatch):
             return {"width": 1284, "height": 2778}
 
         async def _request_json(self, method, path, payload=None):
-            assert (method, path, payload) == ("GET", "/session/SESSION1/orientation", None)
+            assert (method, path, payload) == (
+                "GET",
+                "/session/SESSION1/orientation",
+                None,
+            )
             return {"value": "PORTRAIT"}
 
     fake_wda = types.ModuleType("pymobiledevice3.services.wda")
@@ -382,7 +419,9 @@ def test_swipe_uses_wda_swipe(monkeypatch):
         async def start_session(self):
             return "SESSION1"
 
-        async def swipe(self, start_x, start_y, end_x, end_y, duration=0.2, session_id=None):
+        async def swipe(
+            self, start_x, start_y, end_x, end_y, duration=0.2, session_id=None
+        ):
             calls.append((start_x, start_y, end_x, end_y, duration, session_id))
 
     fake_wda = types.ModuleType("pymobiledevice3.services.wda")

@@ -3,7 +3,7 @@ from hermes_iphone.service import IphoneService
 from hermes_iphone.semantic import compact_tree_from_xml, find_elements
 
 
-SOURCE = '''<?xml version="1.0" encoding="UTF-8"?>
+SOURCE = """<?xml version="1.0" encoding="UTF-8"?>
 <XCUIElementTypeApplication type="XCUIElementTypeApplication" name="Messages" label="Messages" visible="true" x="0" y="0" width="390" height="844" bundleId="com.apple.MobileSMS">
   <XCUIElementTypeWindow type="XCUIElementTypeWindow" visible="true" x="0" y="0" width="390" height="844">
     <XCUIElementTypeButton type="XCUIElementTypeButton" name="Compose" label="Compose" enabled="true" visible="true" x="340" y="40" width="44" height="44"/>
@@ -12,31 +12,50 @@ SOURCE = '''<?xml version="1.0" encoding="UTF-8"?>
     <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="Hidden" label="Hidden" visible="false" x="0" y="0" width="1" height="1"/>
   </XCUIElementTypeWindow>
 </XCUIElementTypeApplication>
-'''
+"""
 
 
 class FakeBackend:
     name = "fake"
+
     def __init__(self):
         self.calls = []
         self.sources = [SOURCE]
+
     def source(self, udid=None):
-        return BackendResult(ok=True, data={"source": self.sources[-1], "udid": udid, "length": len(self.sources[-1])})
+        return BackendResult(
+            ok=True,
+            data={
+                "source": self.sources[-1],
+                "udid": udid,
+                "length": len(self.sources[-1]),
+            },
+        )
+
     def tap(self, x, y, udid=None):
         self.calls.append(("tap", x, y, udid))
         return BackendResult(ok=True, data={"x": x, "y": y, "udid": udid})
+
     def type_text(self, text, udid=None):
         self.calls.append(("type_text", text, udid))
         return BackendResult(ok=True, data={"text_length": len(text), "udid": udid})
+
     def launch_app(self, bundle_id, udid=None):
         self.calls.append(("launch_app", bundle_id, udid))
-        return BackendResult(ok=True, data={"bundle_id": bundle_id, "pid": 123, "udid": udid})
+        return BackendResult(
+            ok=True, data={"bundle_id": bundle_id, "pid": 123, "udid": udid}
+        )
 
 
 def test_compact_tree_filters_visible_accessible_nodes_and_bounds():
     tree = compact_tree_from_xml(SOURCE)
     assert tree["bundle_id"] == "com.apple.MobileSMS"
-    assert [n["label"] for n in tree["elements"]] == ["Messages", "Compose", "To:", "Send"]
+    assert [n["label"] for n in tree["elements"]] == [
+        "Messages",
+        "Compose",
+        "To:",
+        "Send",
+    ]
     compose = tree["elements"][1]
     assert compose["center"] == {"x": 362, "y": 62}
     assert compose["enabled"] is True
@@ -67,14 +86,21 @@ def test_service_type_into_field_taps_field_then_types():
     svc = IphoneService(backend=backend)
     result = svc.type_into_field("To:", "Sean", udid="UDID123")
     assert result["ok"] is True
-    assert backend.calls == [("tap", 195, 122, "UDID123"), ("type_text", "Sean", "UDID123")]
+    assert backend.calls == [
+        ("tap", 195, 122, "UDID123"),
+        ("type_text", "Sean", "UDID123"),
+    ]
 
 
 def test_current_app_and_launch_or_focus():
     backend = FakeBackend()
     svc = IphoneService(backend=backend)
     current = svc.current_app(udid="UDID123")
-    assert current["data"] == {"bundle_id": "com.apple.MobileSMS", "name": "Messages", "udid": "UDID123"}
+    assert current["data"] == {
+        "bundle_id": "com.apple.MobileSMS",
+        "name": "Messages",
+        "udid": "UDID123",
+    }
 
     already = svc.launch_or_focus("com.apple.MobileSMS", udid="UDID123")
     assert already["data"]["already_foreground"] is True

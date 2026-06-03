@@ -15,37 +15,51 @@ def test_service_delegates_ui_actions_to_backend():
 
     class FakeBackend:
         name = "fake"
+
         def list_devices(self):
             return BackendResult(ok=True, data=[{"udid": "abc"}])
+
         def diagnostics(self, udid=None):
             return BackendResult(ok=True, data={"wda": {"ready": True}})
+
         def ensure_wda(self, udid=None):
             calls.append(("ensure_wda", udid))
             return BackendResult(ok=True, data={"wda_ready": True})
+
         def screenshot(self, udid=None):
             calls.append(("screenshot", udid))
             return BackendResult(ok=True, data={"path": "/tmp/shot.png"})
+
         def screen_info(self, udid=None):
             calls.append(("screen_info", udid))
-            return BackendResult(ok=True, data={"window_size": {"width": 1, "height": 2}})
+            return BackendResult(
+                ok=True, data={"window_size": {"width": 1, "height": 2}}
+            )
+
         def source(self, udid=None):
             calls.append(("source", udid))
             return BackendResult(ok=True, data={"source": "<App/>"})
+
         def open_url(self, url, udid=None):
             calls.append(("open_url", url, udid))
             return BackendResult(ok=True, data={"url": url})
+
         def launch_app(self, bundle_id, udid=None):
             calls.append(("launch_app", bundle_id, udid))
             return BackendResult(ok=True, data={"bundle_id": bundle_id})
+
         def tap(self, x, y, udid=None):
             calls.append(("tap", x, y, udid))
             return BackendResult(ok=True, data={"x": x, "y": y})
+
         def swipe(self, start_x, start_y, end_x, end_y, duration=0.2, udid=None):
             calls.append(("swipe", start_x, start_y, end_x, end_y, duration, udid))
             return BackendResult(ok=True, data={"duration": duration})
+
         def type_text(self, text, udid=None):
             calls.append(("type_text", text, udid))
             return BackendResult(ok=True, data={"length": len(text)})
+
         def press_button(self, button, udid=None):
             calls.append(("press_button", button, udid))
             return BackendResult(ok=True, data={"button": button})

@@ -30,7 +30,9 @@ def test_dashboard_catalog_excludes_sensitive_message_send_tools():
     assert catalog["ok"] is True
     assert "status" in catalog["reads"]
     assert "ensure-wda" in catalog["quick_actions"]
-    exposed_values = set(catalog["quick_actions"].values()) | set(catalog["reads"].values())
+    exposed_values = set(catalog["quick_actions"].values()) | set(
+        catalog["reads"].values()
+    )
     assert "send_text" not in exposed_values
     assert "prepare_text" not in exposed_values
     assert "confirm_prepared_action" not in exposed_values
@@ -61,8 +63,12 @@ def test_dashboard_quick_action_maps_defaults_and_inputs(monkeypatch):
 
     monkeypatch.setattr(plugin_api, "_call", fake_call)
 
-    launch = quick_action(QuickActionBody(action="launch-messages", confirm=True, udid="dev1"))
-    open_url = quick_action(QuickActionBody(action="open-url", confirm=True, url="https://example.com"))
+    launch = quick_action(
+        QuickActionBody(action="launch-messages", confirm=True, udid="dev1")
+    )
+    open_url = quick_action(
+        QuickActionBody(action="open-url", confirm=True, url="https://example.com")
+    )
 
     assert launch["method"] == "launch_app"
     assert launch["args"] == {"udid": "dev1", "bundle_id": "com.apple.MobileSMS"}
@@ -74,7 +80,9 @@ def test_dashboard_quick_action_maps_defaults_and_inputs(monkeypatch):
 
 def test_dashboard_quick_action_rejects_unmodeled_fields():
     try:
-        QuickActionBody.model_validate({"action": "home", "confirm": True, "body": "do not allow message body"})
+        QuickActionBody.model_validate(
+            {"action": "home", "confirm": True, "body": "do not allow message body"}
+        )
     except ValidationError as exc:
         assert "Extra inputs are not permitted" in str(exc)
     else:
@@ -95,7 +103,10 @@ def test_dashboard_overview_uses_read_only_snapshot_without_screenshot(monkeypat
     assert result["ok"] is True
     assert ("ensure_wda", {}) not in calls
     assert ("screenshot", {}) not in calls
-    assert ("snapshot_state", {"udid": "dev1", "include_screenshot": False, "limit": 20}) in calls
+    assert (
+        "snapshot_state",
+        {"udid": "dev1", "include_screenshot": False, "limit": 20},
+    ) in calls
 
 
 def test_dashboard_assets_use_guarded_actions_and_redacted_payload_panel():

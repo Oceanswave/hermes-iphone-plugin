@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 
-def schema(name: str, description: str, properties: dict | None = None, required: list[str] | None = None) -> dict:
+def schema(
+    name: str,
+    description: str,
+    properties: dict | None = None,
+    required: list[str] | None = None,
+) -> dict:
     return {
         "name": name,
         "description": description,
@@ -13,4 +18,8 @@ def schema(name: str, description: str, properties: dict | None = None, required
         },
     }
 
-UDID = {"type": "string", "description": "Optional iPhone UDID. If omitted, backend chooses the first connected/trusted device."}
+
+UDID = {
+    "type": "string",
+    "description": "Optional iPhone UDID. If omitted, backend chooses the first connected/trusted device.",
+}
