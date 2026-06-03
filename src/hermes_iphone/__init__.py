@@ -11,6 +11,7 @@ from .service import IphoneService
 from .state import PluginState
 
 TOOLSET = "iphone"
+__version__ = "0.1.0"
 
 
 def _json(fn: Callable[[dict[str, Any]], dict[str, Any]]) -> Callable[[dict[str, Any]], str]:

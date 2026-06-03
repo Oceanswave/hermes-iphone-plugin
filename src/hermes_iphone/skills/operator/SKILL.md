@@ -49,7 +49,7 @@ Device-control prerequisites:
 - `iphone_screen_info`, `iphone_source`, `iphone_tap`, `iphone_swipe`, `iphone_type_text`, and `iphone_press_button` use WebDriverAgent.
 - `iphone_open_url` uses Safari WebInspector automation. Enable Safari Web Inspector and Remote Automation on the iPhone before expecting it to work.
 - `iphone_launch_app` uses DVT ProcessControl and may require Developer Mode / developer services.
-- On iOS 17+, developer services usually require `pymobiledevice3 remote tunneld` running as root; on Sean's host use `/home/oceanswave/ensure-iphone-wda.sh [UDID]`.
+- On iOS 17+, developer services usually require `pymobiledevice3 remote tunneld` running as root; if configured, `~/ensure-iphone-wda.sh [UDID]` can be used as a host-local helper fallback.
 
 Semantic automation notes:
 - Use `iphone_current_app` before app-specific flows.
@@ -72,8 +72,8 @@ Safe Messages flow:
 - Message body text must not be persisted to logs/traces; only body length and metadata are retained.
 
 WDA/self-healing notes:
-- The known WDA runner bundle id on Sean's phone is `com.baristalabs.WebDriverAgentRunner.xctrunner`.
+- The default WDA runner bundle id is `com.baristalabs.WebDriverAgentRunner.xctrunner`; override it with `HERMES_IPHONE_WDA_BUNDLE_ID` when your signed runner uses another bundle id.
 - Prefer `remote tunneld --host 127.0.0.1 --port 49151 --protocol tcp`; `remote start-tunnel --script-mode` can report `Device is not connected` on this host.
-- `iphone_ensure_wda` now prefers plugin-owned native lifecycle orchestration and only falls back to `/home/oceanswave/ensure-iphone-wda.sh` if native startup fails.
+- `iphone_ensure_wda` now prefers plugin-owned native lifecycle orchestration and only falls back to the configured helper path if native startup fails.
 - The correct coordinate tap endpoint for this WDA build is `/session/<id>/wda/tap`, not `/session/<id>/wda/tap/0`.
 - If WDA-backed actions fail, run `iphone_ensure_wda`, then retry once. If it still fails, report the structured error instead of looping.

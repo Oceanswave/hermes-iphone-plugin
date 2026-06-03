@@ -53,20 +53,20 @@ WDA-backed controls call `iphone_ensure_wda` automatically when WDA is unreachab
 
 `iphone_ensure_wda` now prefers plugin-owned native lifecycle orchestration: it checks tunneld, starts tunneld if needed, launches the configured WDA runner, waits for readiness, and only falls back to a host helper script if the native path fails. The helper is compatibility fallback, not the primary user-facing workflow.
 
-Default helper path on Sean's host:
+Default helper path:
 
 ```bash
-/home/oceanswave/ensure-iphone-wda.sh
+~/ensure-iphone-wda.sh
 ```
 
 Useful manual commands:
 
 ```bash
-/home/oceanswave/ensure-iphone-wda.sh 00008110-001855492644801E
-/home/oceanswave/.hermes/hermes-agent/venv/bin/python -m pymobiledevice3 developer wda status --tunnel 00008110-001855492644801E
+~/ensure-iphone-wda.sh <device-udid>
+python -m pymobiledevice3 developer wda status --tunnel <device-udid>
 ```
 
-The helper remains idempotent: it checks tunneld, starts it if needed, launches WebDriverAgentRunner if needed, waits for WDA readiness, then prints `wda-ready`.
+The helper remains idempotent when configured: it checks tunneld, starts it if needed, launches WebDriverAgentRunner if needed, waits for WDA readiness, then prints `wda-ready`.
 
 ## Semantic automation layer
 
@@ -147,20 +147,27 @@ Prepared confirmation tokens are one-time and expire. Message bodies should not 
 
 ## Development
 
-Use the Hermes agent venv on this host:
+Install from GitHub during prerelease development:
 
 ```bash
-cd /home/oceanswave/hermes-iphone-plugin
-/home/oceanswave/.hermes/hermes-agent/venv/bin/python -m pytest -q
-rm -rf dist
-/home/oceanswave/.hermes/hermes-agent/venv/bin/python -m build
-uvx twine check dist/*
+python -m pip install 'hermes-iphone-plugin[iphone] @ git+https://github.com/Oceanswave/hermes-iphone-plugin.git'
 ```
 
-Install into Hermes' venv from this checkout:
+Run local validation from a checkout:
 
 ```bash
-/home/oceanswave/.hermes/hermes-agent/venv/bin/python -m pip install -e '/home/oceanswave/hermes-iphone-plugin[iphone]'
+python -m pip install -e '.[dev]'
+python -m pytest -q
+node --check src/hermes_iphone/dashboard/assets/index.js
+rm -rf dist build *.egg-info
+python -m build
+python -m twine check dist/*
 ```
 
-This checkout is also exposed to Hermes through a small shim at `~/.hermes/plugins/hermes-iphone-plugin`; package metadata provides the `hermes_agent.plugins` entry point.
+For live Hermes development, install into the exact Hermes runtime venv:
+
+```bash
+~/.hermes/hermes-agent/venv/bin/python -m pip install -e '.[iphone]'
+```
+
+Package metadata provides the `hermes_agent.plugins` entry point; dashboard assets are mirrored into Hermes' plugin dashboard directory during registration.
