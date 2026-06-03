@@ -1,0 +1,15 @@
+{
+  "name": "hermes-iphone-plugin",
+  "label": "iPhone",
+  "description": "Attached iPhone readiness, current screen, artifacts, and guarded quick actions from hermes-iphone-plugin.",
+  "icon": "Smartphone",
+  "version": "0.1.0",
+  "tab": {
+    "path": "/iphone",
+    "position": "after:tools"
+  },
+  "slots": ["header-right"],
+  "entry": "assets/index.js",
+  "css": "assets/style.css",
+  "api": "plugin_api.py"
+}

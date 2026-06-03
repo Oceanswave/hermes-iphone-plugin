@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any, Callable
 
+from . import dashboard
 from .safety import SafetyPolicy
 from .schemas import UDID, schema
 from .service import IphoneService
@@ -41,6 +42,8 @@ def _register(ctx, name: str, description: str, properties: dict | None, require
 
 
 def register(ctx) -> None:
+    dashboard.ensure_dashboard_installed()
+
     _register(ctx, "iphone_status", "Report iPhone plugin/backend readiness and safety policy.", {}, [], lambda a: _service().status())
     _register(ctx, "iphone_list_devices", "List attached/trusted iPhones visible to the native backend.", {}, [], lambda a: _service().list_devices())
     _register(ctx, "iphone_ensure_wda", "Ensure RemoteXPC/tunneld and WebDriverAgent are ready for WDA-backed iPhone controls.", {"udid": UDID}, [], lambda a: _service().ensure_wda(udid=a.get("udid")))
