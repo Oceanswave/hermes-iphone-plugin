@@ -52,6 +52,7 @@ jobs:
           /tmp/hermes-iphone-wheel-smoke/bin/python - <<'PY'
           import importlib.metadata as md
           import hermes_iphone
+          import hermes_iphone.dashboard.plugin_api
           eps = md.entry_points(group='hermes_agent.plugins')
           names = {ep.name for ep in eps}
           assert 'hermes-iphone-plugin' in names
